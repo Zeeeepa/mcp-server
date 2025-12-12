@@ -1,0 +1,26 @@
+# Smithery configuration for ContextStream MCP Server
+# https://smithery.ai/docs/config
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      CONTEXTSTREAM_API_URL:
+        type: string
+        description: API base URL
+        default: https://api.contextstream.io
+      CONTEXTSTREAM_API_KEY:
+        type: string
+        description: Your ContextStream API key (get one at contextstream.io)
+    required:
+      - CONTEXTSTREAM_API_KEY
+  commandFunction: |-
+    (config) => ({
+      command: "npx",
+      args: ["-y", "@contextstream/mcp-server"],
+      env: {
+        CONTEXTSTREAM_API_URL: config.CONTEXTSTREAM_API_URL || "https://api.contextstream.io",
+        CONTEXTSTREAM_API_KEY: config.CONTEXTSTREAM_API_KEY
+      }
+    })

@@ -1,0 +1,51 @@
+{
+  "name": "@contextstream/mcp-server",
+  "version": "0.3.15",
+  "description": "MCP server exposing ContextStream public API - code context, memory, search, and AI tools for developers",
+  "type": "module",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "bin": {
+    "contextstream-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node18 --outfile=dist/index.js --format=esm --external:@modelcontextprotocol/sdk && echo '#!/usr/bin/env node' | cat - dist/index.js > dist/index.tmp && mv dist/index.tmp dist/index.js",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.22.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "esbuild": "^0.27.0",
+    "tsx": "^4.15.4",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "contextstream",
+    "ai",
+    "code-context",
+    "memory",
+    "knowledge-graph"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/contextstream/mcp-server.git"
+  },
+  "homepage": "https://github.com/contextstream/mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/contextstream/mcp-server/issues"
+  }
+}
