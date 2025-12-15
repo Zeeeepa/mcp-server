@@ -23,7 +23,7 @@ One integration. Every AI editor. Persistent memory that never forgets.
 <div align="center">
 
 <a href="https://contextstream.io">
-  <img src="https://customer-vtx4jsqwkbsjpv5b.cloudflarestream.com/f083cfa709a679bd72ef48aca6fe0af2/thumbnails/thumbnail.gif?time=2s&height=600" alt="ContextStream Demo - AI that remembers across sessions" width="600" />
+  <img src="https://raw.githubusercontent.com/contextstream/mcp-server/main/mcp.gif.gif" alt="ContextStream Demo - AI that remembers across sessions" width="600" />
 </a>
 
 <sub>Your AI remembers decisions, preferences, and context — across sessions and tools.</sub>
