@@ -175,6 +175,19 @@ AI: "You prefer functional React components."
 
 ✨ **That's it. Your AI remembers now.**
 
+### 4. (Optional) Connect GitHub + Slack for richer context
+
+MCP gives your AI memory. Integrations make that memory richer by pulling in PRs, issues, and team conversations.
+
+- GitHub App setup + connect flow: https://contextstream.io/docs/integrations/github
+- Slack app setup + connect flow: https://contextstream.io/docs/integrations/slack
+
+After you connect, try prompts like:
+```
+"Search our Slack messages for the decision about rate limiting."
+"What did we decide in GitHub issues about the auth flow?"
+```
+
 ---
 
 ## Beyond Memory: Intelligence That Compounds
