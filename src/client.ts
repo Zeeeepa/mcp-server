@@ -1086,6 +1086,27 @@ export class ContextStreamClient {
   // ============================================
 
   /**
+   * Record a token savings event for user-facing dashboard analytics.
+   * Best-effort: callers should not await this in latency-sensitive paths.
+   */
+  trackTokenSavings(body: {
+    tool: string;
+    source?: string;
+    workspace_id?: string;
+    project_id?: string;
+    candidate_chars: number;
+    context_chars: number;
+    max_tokens?: number;
+    metadata?: any;
+  }) {
+    const payload = this.withDefaults({
+      source: 'mcp',
+      ...body,
+    });
+    return request(this.config, '/analytics/token-savings', { body: payload });
+  }
+
+  /**
    * Get a compact, token-efficient summary of workspace context.
    * Designed to be included in every AI prompt without consuming many tokens.
    *
@@ -1196,7 +1217,34 @@ export class ContextStreamClient {
     parts.push('');
     parts.push('💡 Use session_recall("topic") for specific context');
 
-    const summary = parts.join('\n');
+    const candidateSummary = parts.join('\n');
+    const maxChars = maxTokens * 4; // ~4 chars per token
+
+    // Enforce max token budget by truncating on line boundaries (keeps summary stable).
+    const candidateLines = candidateSummary.split('\n');
+    const finalLines: string[] = [];
+    let used = 0;
+    for (const line of candidateLines) {
+      const next = (finalLines.length ? '\n' : '') + line;
+      if (used + next.length > maxChars) break;
+      finalLines.push(line);
+      used += next.length;
+    }
+    const summary = finalLines.join('\n');
+
+    // Best-effort analytics: record how much we trimmed vs the full candidate summary.
+    this.trackTokenSavings({
+      tool: 'session_summary',
+      workspace_id: withDefaults.workspace_id,
+      project_id: withDefaults.project_id,
+      candidate_chars: candidateSummary.length,
+      context_chars: summary.length,
+      max_tokens: maxTokens,
+      metadata: {
+        decision_count: decisionCount,
+        memory_count: memoryCount,
+      },
+    }).catch(() => {});
 
     return {
       summary,
@@ -1408,6 +1456,7 @@ export class ContextStreamClient {
     const maxChars = maxTokens * charsPerToken;
     
     const parts: string[] = [];
+    const candidateParts: string[] = [];
     const sources: Array<{ type: string; title: string }> = [];
     let currentChars = 0;
 
@@ -1422,14 +1471,26 @@ export class ContextStreamClient {
         
         if (decisions.items) {
           parts.push('## Relevant Decisions\n');
+          candidateParts.push('## Relevant Decisions\n');
           currentChars += 25;
           
-          for (const d of decisions.items) {
-            const entry = `• ${d.title || 'Decision'}\n`;
-            if (currentChars + entry.length > maxChars * 0.4) break; // Reserve 40% for decisions
-            parts.push(entry);
-            currentChars += entry.length;
-            sources.push({ type: 'decision', title: d.title || 'Decision' });
+          const decisionEntries = decisions.items.map((d) => {
+            const title = d.title || 'Decision';
+            return { title, entry: `• ${title}\n` };
+          });
+
+          // Candidate: everything we could include before packing/truncation.
+          for (const d of decisionEntries) {
+            candidateParts.push(d.entry);
+          }
+          candidateParts.push('\n');
+
+          // Final: what fits in the budget.
+          for (const d of decisionEntries) {
+            if (currentChars + d.entry.length > maxChars * 0.4) break; // Reserve 40% for decisions
+            parts.push(d.entry);
+            currentChars += d.entry.length;
+            sources.push({ type: 'decision', title: d.title });
           }
           parts.push('\n');
         }
@@ -1448,17 +1509,27 @@ export class ContextStreamClient {
         
         if (memory.results) {
           parts.push('## Related Context\n');
+          candidateParts.push('## Related Context\n');
           currentChars += 20;
           
-          for (const m of memory.results) {
-            // Truncate content to fit budget
+          const memoryEntries = memory.results.map((m) => {
             const title = m.title || 'Context';
             const content = m.content?.slice(0, 200) || '';
-            const entry = `• ${title}: ${content}...\n`;
-            if (currentChars + entry.length > maxChars * 0.7) break; // Reserve 30% for code
-            parts.push(entry);
-            currentChars += entry.length;
-            sources.push({ type: 'memory', title });
+            return { title, entry: `• ${title}: ${content}...\n` };
+          });
+
+          // Candidate: everything we could include before packing/truncation.
+          for (const m of memoryEntries) {
+            candidateParts.push(m.entry);
+          }
+          candidateParts.push('\n');
+
+          // Final: what fits in the budget.
+          for (const m of memoryEntries) {
+            if (currentChars + m.entry.length > maxChars * 0.7) break; // Reserve 30% for code
+            parts.push(m.entry);
+            currentChars += m.entry.length;
+            sources.push({ type: 'memory', title: m.title });
           }
           parts.push('\n');
         }
@@ -1477,23 +1548,49 @@ export class ContextStreamClient {
         
         if (code.results) {
           parts.push('## Relevant Code\n');
+          candidateParts.push('## Relevant Code\n');
           currentChars += 18;
           
-          for (const c of code.results) {
+          const codeEntries = code.results.map((c) => {
             const path = c.file_path || 'file';
             const content = c.content?.slice(0, 150) || '';
-            const entry = `• ${path}: ${content}...\n`;
-            if (currentChars + entry.length > maxChars) break;
-            parts.push(entry);
-            currentChars += entry.length;
-            sources.push({ type: 'code', title: path });
+            return { path, entry: `• ${path}: ${content}...\n` };
+          });
+
+          // Candidate: everything we could include before packing/truncation.
+          for (const c of codeEntries) {
+            candidateParts.push(c.entry);
+          }
+
+          // Final: what fits in the budget.
+          for (const c of codeEntries) {
+            if (currentChars + c.entry.length > maxChars) break;
+            parts.push(c.entry);
+            currentChars += c.entry.length;
+            sources.push({ type: 'code', title: c.path });
           }
         }
       } catch { /* optional */ }
     }
 
     const context = parts.join('');
+    const candidateContext = candidateParts.join('');
     const tokenEstimate = Math.ceil(context.length / charsPerToken);
+
+    this.trackTokenSavings({
+      tool: 'ai_context_budget',
+      workspace_id: withDefaults.workspace_id,
+      project_id: withDefaults.project_id,
+      candidate_chars: candidateContext.length,
+      context_chars: context.length,
+      max_tokens: maxTokens,
+      metadata: {
+        include_decisions: params.include_decisions !== false,
+        include_memory: params.include_memory !== false,
+        include_code: !!params.include_code,
+        sources: sources.length,
+      },
+    }).catch(() => {});
 
     return {
       context,
@@ -1723,6 +1820,7 @@ export class ContextStreamClient {
     let context: string;
     let charsUsed = 0;
     const maxChars = maxTokens * 4; // ~4 chars per token
+    let candidateContext: string;
     
     if (format === 'minified') {
       // Ultra-compact format: TYPE:value|TYPE:value|...
@@ -1734,6 +1832,7 @@ export class ContextStreamClient {
         charsUsed += entry.length + 1;
       }
       context = parts.join('|');
+      candidateContext = items.map((i) => `${i.type}:${i.value}`).join('|');
     } else if (format === 'structured') {
       // JSON-like compact format
       const grouped: Record<string, string[]> = {};
@@ -1744,6 +1843,13 @@ export class ContextStreamClient {
         charsUsed += item.value.length + 5;
       }
       context = JSON.stringify(grouped);
+
+      const candidateGrouped: Record<string, string[]> = {};
+      for (const item of items) {
+        if (!candidateGrouped[item.type]) candidateGrouped[item.type] = [];
+        candidateGrouped[item.type].push(item.value);
+      }
+      candidateContext = JSON.stringify(candidateGrouped);
     } else {
       // Readable format (default)
       const lines: string[] = ['[CTX]'];
@@ -1755,6 +1861,13 @@ export class ContextStreamClient {
       }
       lines.push('[/CTX]');
       context = lines.join('\n');
+
+      const candidateLines: string[] = ['[CTX]'];
+      for (const item of items) {
+        candidateLines.push(`${item.type}:${item.value}`);
+      }
+      candidateLines.push('[/CTX]');
+      candidateContext = candidateLines.join('\n');
     }
     
     // If context is empty but we have workspace, add a hint
@@ -1763,7 +1876,23 @@ export class ContextStreamClient {
       context = format === 'minified'
         ? `W:${wsHint}|[NO_MATCHES]`
         : `[CTX]\nW:${wsHint}\n[NO_MATCHES]\n[/CTX]`;
+      candidateContext = context;
     }
+
+    this.trackTokenSavings({
+      tool: 'context_smart',
+      workspace_id: withDefaults.workspace_id,
+      project_id: withDefaults.project_id,
+      candidate_chars: candidateContext.length,
+      context_chars: context.length,
+      max_tokens: maxTokens,
+      metadata: {
+        format,
+        items: items.length,
+        keywords: keywords.slice(0, 10),
+        errors: errors.length,
+      },
+    }).catch(() => {});
 
     return {
       context,
