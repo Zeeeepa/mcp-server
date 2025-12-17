@@ -1344,11 +1344,26 @@ Behavior:
 
       const folderName = folderPath.split('/').pop() || 'My Project';
 
-      const newWorkspace = await client.createWorkspace({
-        name: input.workspace_name,
-        description: input.description || `Workspace created for ${folderPath}`,
-        visibility: input.visibility || 'private',
-      }) as { id?: string; name?: string };
+      let newWorkspace: { id?: string; name?: string };
+      try {
+        newWorkspace = (await client.createWorkspace({
+          name: input.workspace_name,
+          description: input.description || `Workspace created for ${folderPath}`,
+          visibility: input.visibility || 'private',
+        })) as { id?: string; name?: string };
+      } catch (err: any) {
+        const message = err?.message || String(err);
+        if (typeof message === 'string' && message.includes('workspaces_slug_key')) {
+          return errorResult(
+            [
+              'Failed to create workspace: the workspace slug is already taken (or reserved by a deleted workspace).',
+              '',
+              'Try a slightly different workspace name (e.g., add a suffix) and re-run `workspace_bootstrap`.',
+            ].join('\n')
+          );
+        }
+        throw err;
+      }
 
       if (!newWorkspace?.id) {
         return errorResult('Error: failed to create workspace.');
