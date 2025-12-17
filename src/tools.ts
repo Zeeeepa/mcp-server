@@ -1192,6 +1192,7 @@ This does semantic search on the first message. You only need context_smart on s
         include_recent_memory: z.boolean().optional().describe('Include recent memory events (default: true)'),
         include_decisions: z.boolean().optional().describe('Include recent decisions (default: true)'),
         auto_index: z.boolean().optional().describe('Automatically create and index project from IDE workspace (default: true)'),
+        allow_no_workspace: z.boolean().optional().describe('If true, allow session_init to return connected even if no workspace is resolved (workspace-level tools may not work).'),
       }),
     },
     async (input) => {
@@ -1217,8 +1218,63 @@ This does semantic search on the first message. You only need context_smart on s
       if (sessionManager) {
         sessionManager.markInitialized(result);
       }
-      
-      return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+
+      const status = typeof result.status === 'string' ? (result.status as string) : '';
+      const workspaceWarning = typeof (result as any).workspace_warning === 'string'
+        ? ((result as any).workspace_warning as string)
+        : '';
+
+      let text = formatContent(result);
+
+      if (status === 'requires_workspace_name') {
+        const folderPath = typeof (result as any).folder_path === 'string'
+          ? ((result as any).folder_path as string)
+          : (typeof input.folder_path === 'string' ? input.folder_path : '');
+
+        text = [
+          'Action required: no workspaces found for this account.',
+          'Ask the user for a name for the new workspace, then run `workspace_bootstrap`.',
+          folderPath
+            ? `Recommended: workspace_bootstrap(workspace_name: \"<name>\", folder_path: \"${folderPath}\")`
+            : 'Recommended: workspace_bootstrap(workspace_name: \"<name>\", folder_path: \"<your repo folder>\")',
+          '',
+          '--- Raw Response ---',
+          '',
+          formatContent(result),
+        ].join('\n');
+      } else if (status === 'requires_workspace_selection') {
+        const folderName = typeof (result as any).folder_name === 'string'
+          ? ((result as any).folder_name as string)
+          : (typeof input.folder_path === 'string' ? input.folder_path.split('/').pop() || 'this folder' : 'this folder');
+
+        const candidates = Array.isArray((result as any).workspace_candidates)
+          ? ((result as any).workspace_candidates as Array<{ id?: string; name?: string; description?: string }>)
+          : [];
+
+        const lines: string[] = [];
+        lines.push(`Action required: select a workspace for "${folderName}" (or create a new one).`);
+        if (candidates.length > 0) {
+          lines.push('');
+          lines.push('Available workspaces:');
+          candidates.slice(0, 25).forEach((w, i) => {
+            const name = w.name || 'Untitled';
+            const id = w.id ? ` (${w.id})` : '';
+            const desc = w.description ? ` - ${w.description}` : '';
+            lines.push(`  ${i + 1}. ${name}${id}${desc}`);
+          });
+        }
+        lines.push('');
+        lines.push('Then run `workspace_associate` with the selected workspace_id and your folder_path.');
+        lines.push('');
+        lines.push('--- Raw Response ---');
+        lines.push('');
+        lines.push(formatContent(result));
+        text = lines.join('\n');
+      } else if (workspaceWarning) {
+        text = [`Warning: ${workspaceWarning}`, '', formatContent(result)].join('\n');
+      }
+
+      return { content: [{ type: 'text' as const, text }], structuredContent: toStructured(result) };
     }
   );
 

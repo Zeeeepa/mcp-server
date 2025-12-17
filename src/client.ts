@@ -510,6 +510,12 @@ export class ContextStreamClient {
     include_decisions?: boolean;
     include_user_preferences?: boolean;
     auto_index?: boolean;
+    /**
+     * If true, session_init will return `status: "connected"` even when no workspace
+     * can be resolved. Workspace-level tools (memory/search/graph) may not work without
+     * a workspace, so default behavior is to prompt the user to select/create one.
+     */
+    allow_no_workspace?: boolean;
   }, ideRoots: string[] = []) {
     let workspaceId = params.workspace_id || this.config.defaultWorkspaceId;
     let projectId = params.project_id || this.config.defaultProjectId;
@@ -659,6 +665,50 @@ export class ContextStreamClient {
       }
     }
 
+    // If we still couldn't resolve a workspace, do not silently continue.
+    // Ask the user to select/create a workspace unless explicitly allowed.
+    if (!workspaceId && !params.allow_no_workspace) {
+      const folderDisplayName = rootPath?.split('/').pop() || 'this folder';
+
+      context.ide_roots = ideRoots;
+      context.folder_name = folderDisplayName;
+      if (rootPath) {
+        context.folder_path = rootPath;
+      }
+      context.suggested_project_name = folderDisplayName;
+
+      try {
+        const workspaces = await this.listWorkspaces({ page_size: 50 }) as {
+          items?: Array<{ id: string; name: string; description?: string }>;
+        };
+
+        const items = Array.isArray(workspaces.items) ? workspaces.items : [];
+        if (items.length > 0) {
+          context.status = 'requires_workspace_selection';
+          context.workspace_candidates = items.map((w) => ({
+            id: w.id,
+            name: w.name,
+            description: w.description,
+          }));
+          context.message =
+            `This folder is not associated with a workspace yet. Please select which workspace to use, or create a new one.`;
+          return context;
+        }
+
+        context.status = 'requires_workspace_name';
+        context.workspace_source = 'none_found';
+        context.message =
+          `No workspaces found for this account. Ask the user for a name for a new workspace, then create a project for "${folderDisplayName}".`;
+        return context;
+      } catch (e) {
+        context.status = 'requires_workspace_selection';
+        context.workspace_error = String(e);
+        context.message =
+          `Unable to resolve a workspace automatically (${String(e)}). Please provide workspace_id, or create one with workspace_bootstrap.`;
+        return context;
+      }
+    }
+
     // ========================================
     // STEP 2: Project Discovery
     // ========================================
@@ -747,6 +797,11 @@ export class ContextStreamClient {
     context.workspace_name = workspaceName;
     context.project_id = projectId;
     context.ide_roots = ideRoots;
+
+    if (!workspaceId) {
+      context.workspace_warning =
+        'No workspace was resolved for this session. Workspace-level tools (memory/search/graph) may not work until you associate this folder with a workspace.';
+    }
 
     // ========================================
     // STEP 3: Load Context via Batched Endpoint
