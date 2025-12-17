@@ -2316,4 +2316,179 @@ This saves ~80% tokens compared to including full chat history.`,
       };
     }
   );
+
+  // ============================================
+  // Slack Integration Tools
+  // ============================================
+
+  registerTool(
+    'slack_stats',
+    {
+      title: 'Slack overview stats',
+      description: `Get Slack integration statistics and overview for a workspace.
+Returns: total messages, threads, active users, channel stats, activity trends, and sync status.
+Use this to understand Slack activity and engagement patterns.`,
+      inputSchema: z.object({
+        workspace_id: z.string().uuid().optional(),
+        days: z.number().optional().describe('Number of days to include in stats (default: 30)'),
+      }),
+    },
+    async (input) => {
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult('Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.');
+      }
+
+      const result = await client.slackStats({ workspace_id: workspaceId, days: input.days });
+      return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+    }
+  );
+
+  registerTool(
+    'slack_channels',
+    {
+      title: 'List Slack channels',
+      description: `Get synced Slack channels with statistics for a workspace.
+Returns: channel names, message counts, thread counts, and last activity timestamps.`,
+      inputSchema: z.object({
+        workspace_id: z.string().uuid().optional(),
+      }),
+    },
+    async (input) => {
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult('Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.');
+      }
+
+      const result = await client.slackChannels({ workspace_id: workspaceId });
+      return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+    }
+  );
+
+  registerTool(
+    'slack_contributors',
+    {
+      title: 'Slack top contributors',
+      description: `Get top Slack contributors for a workspace.
+Returns: user profiles with message counts, sorted by activity level.`,
+      inputSchema: z.object({
+        workspace_id: z.string().uuid().optional(),
+        limit: z.number().optional().describe('Maximum contributors to return (default: 20)'),
+      }),
+    },
+    async (input) => {
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult('Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.');
+      }
+
+      const result = await client.slackContributors({ workspace_id: workspaceId, limit: input.limit });
+      return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+    }
+  );
+
+  registerTool(
+    'slack_activity',
+    {
+      title: 'Slack activity feed',
+      description: `Get recent Slack activity feed for a workspace.
+Returns: messages with user info, reactions, replies, and timestamps.
+Can filter by channel.`,
+      inputSchema: z.object({
+        workspace_id: z.string().uuid().optional(),
+        limit: z.number().optional().describe('Maximum messages to return (default: 50)'),
+        offset: z.number().optional().describe('Pagination offset'),
+        channel_id: z.string().optional().describe('Filter by specific channel ID'),
+      }),
+    },
+    async (input) => {
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult('Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.');
+      }
+
+      const result = await client.slackActivity({
+        workspace_id: workspaceId,
+        limit: input.limit,
+        offset: input.offset,
+        channel_id: input.channel_id,
+      });
+      return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+    }
+  );
+
+  registerTool(
+    'slack_discussions',
+    {
+      title: 'Slack key discussions',
+      description: `Get high-engagement Slack discussions/threads for a workspace.
+Returns: threads with high reply/reaction counts, sorted by engagement.
+Useful for finding important conversations and decisions.`,
+      inputSchema: z.object({
+        workspace_id: z.string().uuid().optional(),
+        limit: z.number().optional().describe('Maximum discussions to return (default: 20)'),
+      }),
+    },
+    async (input) => {
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult('Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.');
+      }
+
+      const result = await client.slackDiscussions({ workspace_id: workspaceId, limit: input.limit });
+      return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+    }
+  );
+
+  registerTool(
+    'slack_search',
+    {
+      title: 'Search Slack messages',
+      description: `Search Slack messages for a workspace.
+Returns: matching messages with channel, user, and engagement info.
+Use this to find specific conversations or topics.`,
+      inputSchema: z.object({
+        workspace_id: z.string().uuid().optional(),
+        q: z.string().describe('Search query'),
+        limit: z.number().optional().describe('Maximum results (default: 50)'),
+      }),
+    },
+    async (input) => {
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult('Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.');
+      }
+
+      const result = await client.slackSearch({ workspace_id: workspaceId, q: input.q, limit: input.limit });
+      return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+    }
+  );
+
+  registerTool(
+    'slack_sync_users',
+    {
+      title: 'Sync Slack users',
+      description: `Trigger a sync of Slack user profiles for a workspace.
+This fetches the latest user info from Slack and updates local profiles.
+Also auto-maps Slack users to ContextStream users by email.`,
+      inputSchema: z.object({
+        workspace_id: z.string().uuid().optional(),
+      }),
+    },
+    async (input) => {
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult('Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.');
+      }
+
+      const result = await client.slackSyncUsers({ workspace_id: workspaceId });
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `✅ Synced ${result.synced_users} Slack users, auto-mapped ${result.auto_mapped} by email.`
+        }],
+        structuredContent: toStructured(result)
+      };
+    }
+  );
 }

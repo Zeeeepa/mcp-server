@@ -2095,7 +2095,7 @@ export class ContextStreamClient {
    */
   private calculateRelevance(keywords: string[], text: string): number {
     if (keywords.length === 0) return 0.5;
-    
+
     const textLower = text.toLowerCase();
     let matches = 0;
     for (const keyword of keywords) {
@@ -2103,7 +2103,241 @@ export class ContextStreamClient {
         matches++;
       }
     }
-    
+
     return matches / keywords.length;
+  }
+
+  // ============================================
+  // Slack Integration Methods
+  // ============================================
+
+  /**
+   * Get Slack integration statistics and overview
+   */
+  async slackStats(params: {
+    workspace_id?: string;
+    days?: number;
+  }): Promise<{
+    summary: {
+      total_messages: number;
+      total_threads: number;
+      active_users: number;
+      channels_synced: number;
+    };
+    channels: Array<{
+      channel_id: string;
+      channel_name: string;
+      message_count: number;
+      thread_count: number;
+      last_message_at: string | null;
+    }>;
+    activity: Array<{
+      date: string;
+      messages: number;
+      threads: number;
+    }>;
+    sync_status: {
+      status: string;
+      last_sync_at: string | null;
+      next_sync_at: string | null;
+      error_message: string | null;
+    };
+  }> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for Slack stats');
+    }
+    const query = new URLSearchParams();
+    if (params?.days) query.set('days', String(params.days));
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/stats${suffix}`, { method: 'GET' });
+  }
+
+  /**
+   * Get Slack users for a workspace
+   */
+  async slackUsers(params: {
+    workspace_id?: string;
+    page?: number;
+    per_page?: number;
+  }): Promise<{
+    items: Array<{
+      id: string;
+      slack_user_id: string;
+      display_name: string | null;
+      real_name: string | null;
+      email: string | null;
+      avatar_url: string | null;
+      is_bot: boolean;
+      message_count: number;
+      last_message_at: string | null;
+    }>;
+    total: number;
+    page: number;
+    per_page: number;
+    total_pages: number;
+  }> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for Slack users');
+    }
+    const query = new URLSearchParams();
+    if (params?.page) query.set('page', String(params.page));
+    if (params?.per_page) query.set('per_page', String(params.per_page));
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/users${suffix}`, { method: 'GET' });
+  }
+
+  /**
+   * Get Slack channels with stats
+   */
+  async slackChannels(params: {
+    workspace_id?: string;
+  }): Promise<Array<{
+    channel_id: string;
+    channel_name: string;
+    message_count: number;
+    thread_count: number;
+    last_message_at: string | null;
+  }>> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for Slack channels');
+    }
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/channels`, { method: 'GET' });
+  }
+
+  /**
+   * Get recent Slack activity feed
+   */
+  async slackActivity(params: {
+    workspace_id?: string;
+    limit?: number;
+    offset?: number;
+    channel_id?: string;
+  }): Promise<Array<{
+    id: string;
+    channel_id: string;
+    channel_name: string;
+    user_id: string | null;
+    user_name: string | null;
+    user_avatar: string | null;
+    content: string;
+    content_preview: string | null;
+    occurred_at: string;
+    reply_count: number;
+    reaction_count: number;
+    thread_ts: string | null;
+  }>> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for Slack activity');
+    }
+    const query = new URLSearchParams();
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.offset) query.set('offset', String(params.offset));
+    if (params?.channel_id) query.set('channel_id', params.channel_id);
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/activity${suffix}`, { method: 'GET' });
+  }
+
+  /**
+   * Get high-engagement Slack discussions
+   */
+  async slackDiscussions(params: {
+    workspace_id?: string;
+    limit?: number;
+  }): Promise<Array<{
+    id: string;
+    channel_id: string;
+    channel_name: string;
+    content_preview: string;
+    reply_count: number;
+    reaction_count: number;
+    participant_count: number;
+    occurred_at: string;
+  }>> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for Slack discussions');
+    }
+    const query = new URLSearchParams();
+    if (params?.limit) query.set('limit', String(params.limit));
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/discussions${suffix}`, { method: 'GET' });
+  }
+
+  /**
+   * Get top Slack contributors
+   */
+  async slackContributors(params: {
+    workspace_id?: string;
+    limit?: number;
+  }): Promise<Array<{
+    id: string;
+    slack_user_id: string;
+    display_name: string | null;
+    real_name: string | null;
+    email: string | null;
+    avatar_url: string | null;
+    is_bot: boolean;
+    message_count: number;
+    last_message_at: string | null;
+  }>> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for Slack contributors');
+    }
+    const query = new URLSearchParams();
+    if (params?.limit) query.set('limit', String(params.limit));
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/contributors${suffix}`, { method: 'GET' });
+  }
+
+  /**
+   * Trigger a sync of Slack user profiles
+   */
+  async slackSyncUsers(params: {
+    workspace_id?: string;
+  }): Promise<{
+    synced_users: number;
+    auto_mapped: number;
+  }> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for syncing Slack users');
+    }
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/sync-users`, { method: 'POST' });
+  }
+
+  /**
+   * Search Slack messages
+   */
+  async slackSearch(params: {
+    workspace_id?: string;
+    q: string;
+    limit?: number;
+  }): Promise<Array<{
+    id: string;
+    channel_id: string;
+    channel_name: string;
+    user_id: string | null;
+    user_name: string | null;
+    user_avatar: string | null;
+    content: string;
+    content_preview: string | null;
+    occurred_at: string;
+    reply_count: number;
+    reaction_count: number;
+    thread_ts: string | null;
+  }>> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for Slack search');
+    }
+    const query = new URLSearchParams();
+    query.set('q', params.q);
+    if (params?.limit) query.set('limit', String(params.limit));
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/search?${query.toString()}`, { method: 'GET' });
   }
 }
