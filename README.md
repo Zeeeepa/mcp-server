@@ -2,7 +2,21 @@
 
 Persistent memory, semantic search, and code intelligence for any MCP-compatible AI tool.
 
-ContextStream is a shared “brain” for your AI workflows. It stores decisions, preferences, and lessons, and lets your AI tools search and analyze your codebase with consistent context across sessions.
+ContextStream is a shared "brain" for your AI workflows. It stores decisions, preferences, and lessons, and lets your AI tools search and analyze your codebase with consistent context across sessions.
+
+## Just Talk Naturally
+
+**You don't need to memorize tool names or call them directly.** Just describe what you want and your AI assistant uses the right ContextStream tools automatically:
+
+| You say... | The AI does... |
+|------------|----------------|
+| "session summary" | Gets a summary of your workspace context |
+| "what did we decide about auth?" | Recalls past decisions about authentication |
+| "remember we're using PostgreSQL" | Saves this to memory for future sessions |
+| "search for payment code" | Searches your codebase semantically |
+| "what depends on UserService?" | Analyzes code dependencies |
+
+No special syntax. No tool names. Just ask.
 
 ## Features
 
@@ -111,13 +125,6 @@ If your account has no workspaces, ContextStream will prompt your AI assistant t
 - The current folder is created as a project inside that workspace
 - Recommended: call `workspace_bootstrap(workspace_name="...", folder_path="...")`
 
-### Slash commands (prompts)
-
-Most MCP clients expose ContextStream prompts as `/contextstream:...` slash commands.
-
-- Prompts are parameter-free: selecting a command should immediately insert the template.
-- Templates avoid asking for workspace/project IDs and instead rely on `session_init` + session defaults.
-
 ## Free vs PRO tools
 
 Tools are labeled as `(Free)` or `(PRO)` in the MCP tool list.
@@ -128,8 +135,7 @@ Tools are labeled as `(Free)` or `(PRO)` in the MCP tool list.
 
 ## Troubleshooting
 
-- Prompts/tools not appearing: restart the client after editing MCP config; confirm Node 18+ is available to the client runtime.
-- Slash commands do nothing: update to the latest `@contextstream/mcp-server` and restart your MCP client (prompts are parameter-free and should insert immediately).
+- Tools not appearing: restart the client after editing MCP config; confirm Node 18+ is available to the client runtime.
 - Unauthorized errors: verify `CONTEXTSTREAM_API_URL` and `CONTEXTSTREAM_API_KEY` (or `CONTEXTSTREAM_JWT`).
 - Wrong workspace/project: use `workspace_associate` to map the current repo folder to the correct workspace.
 

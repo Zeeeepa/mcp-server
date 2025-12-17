@@ -4,7 +4,8 @@ import { loadConfig } from './config.js';
 import { ContextStreamClient } from './client.js';
 import { registerTools } from './tools.js';
 import { registerResources } from './resources.js';
-import { registerPrompts } from './prompts.js';
+// Note: Prompts are disabled as they're confusing - users can just use natural language directly
+// import { registerPrompts } from './prompts.js';
 import { SessionManager } from './session-manager.js';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
@@ -107,7 +108,7 @@ async function main() {
   // Register all MCP components with auto-context enabled
   registerTools(server, client, sessionManager);
   registerResources(server, client, config.apiUrl);
-  registerPrompts(server);
+  // registerPrompts(server); // Disabled - users can just use natural language directly
 
   // Log startup info (to stderr to not interfere with stdio protocol)
   console.error(`ContextStream MCP server v${VERSION} starting...`);
