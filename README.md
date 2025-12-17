@@ -4,19 +4,23 @@ Persistent memory, semantic search, and code intelligence for any MCP-compatible
 
 ContextStream is a shared "brain" for your AI workflows. It stores decisions, preferences, and lessons, and lets your AI tools search and analyze your codebase with consistent context across sessions.
 
-## Just Talk Naturally
+## Just Ask
 
-**You don't need to memorize tool names or call them directly.** Just describe what you want and your AI assistant uses the right ContextStream tools automatically:
+**You don't need to memorize tool names.** Just describe what you want and your AI uses the right ContextStream tools automatically:
 
-| You say... | The AI does... |
-|------------|----------------|
+| You say... | ContextStream does... |
+|------------|----------------------|
 | "session summary" | Gets a summary of your workspace context |
 | "what did we decide about auth?" | Recalls past decisions about authentication |
 | "remember we're using PostgreSQL" | Saves this to memory for future sessions |
 | "search for payment code" | Searches your codebase semantically |
 | "what depends on UserService?" | Analyzes code dependencies |
 
-No special syntax. No tool names. Just ask.
+No special syntax. No commands to learn. Just ask.
+
+> **Tip:** For best results, add the [recommended editor rules](https://contextstream.io/docs/quickstart) so your AI consistently calls `session_init` / `context_smart` automatically.
+
+![ContextStream in action](mcp.gif.gif)
 
 ## Features
 
