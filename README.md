@@ -38,6 +38,21 @@ No special syntax. No commands to learn. Just ask.
 
 ## Quickstart
 
+### Setup wizard (recommended)
+
+This interactive wizard sets up authentication, installs editor rules, and writes MCP config files for the tools you select.
+
+```bash
+npx -y @contextstream/mcp-server setup
+```
+
+Notes:
+- Uses browser/device login by default and creates an API key for you (stored locally in the config files it writes).
+- Some tools still require UI/CLI-based MCP setup (the wizard will tell you when it can’t write a config).
+- Preview changes without writing files: `npx -y @contextstream/mcp-server setup --dry-run`
+
+### Run the server
+
 Run directly (recommended for MCP configs):
 
 ```bash
