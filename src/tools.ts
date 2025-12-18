@@ -34,6 +34,21 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     'ai_embeddings',
     'ai_plan',
     'ai_tasks',
+    // Slack integration tools
+    'slack_stats',
+    'slack_channels',
+    'slack_contributors',
+    'slack_activity',
+    'slack_discussions',
+    'slack_search',
+    'slack_sync_users',
+    // GitHub integration tools
+    'github_stats',
+    'github_repos',
+    'github_contributors',
+    'github_activity',
+    'github_issues',
+    'github_search',
   ]);
 
   const proTools = (() => {
