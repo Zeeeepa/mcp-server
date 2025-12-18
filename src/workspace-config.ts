@@ -10,7 +10,7 @@ export interface WorkspaceConfig {
 }
 
 export interface ParentMapping {
-  pattern: string; // e.g., "/home/escott/dev/maker/*"
+  pattern: string; // e.g., "/home/user/dev/projects/*"
   workspace_id: string;
   workspace_name: string;
 }
@@ -89,10 +89,11 @@ export function writeGlobalMappings(mappings: ParentMapping[]): boolean {
  * Add a new parent folder mapping
  */
 export function addGlobalMapping(mapping: ParentMapping): boolean {
+  const normalizedPattern = path.normalize(mapping.pattern);
   const mappings = readGlobalMappings();
   // Remove any existing mapping with same pattern
-  const filtered = mappings.filter(m => m.pattern !== mapping.pattern);
-  filtered.push(mapping);
+  const filtered = mappings.filter(m => path.normalize(m.pattern) !== normalizedPattern);
+  filtered.push({ ...mapping, pattern: normalizedPattern });
   return writeGlobalMappings(filtered);
 }
 
@@ -104,13 +105,15 @@ export function findMatchingMapping(repoPath: string): ParentMapping | null {
   const normalizedRepo = path.normalize(repoPath);
   
   for (const mapping of mappings) {
-    // Handle wildcard patterns like "/home/escott/dev/maker/*"
-    if (mapping.pattern.endsWith('/*')) {
-      const parentDir = mapping.pattern.slice(0, -2);
+    const normalizedPattern = path.normalize(mapping.pattern);
+
+    // Handle wildcard patterns like "/home/user/dev/projects/*" (or "C:\\dev\\projects\\*")
+    if (normalizedPattern.endsWith(`${path.sep}*`)) {
+      const parentDir = normalizedPattern.slice(0, -2);
       if (normalizedRepo.startsWith(parentDir + path.sep)) {
         return mapping;
       }
-    } else if (normalizedRepo === path.normalize(mapping.pattern)) {
+    } else if (normalizedRepo === normalizedPattern) {
       return mapping;
     }
   }

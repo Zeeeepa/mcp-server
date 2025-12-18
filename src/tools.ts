@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import * as path from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ContextStreamClient } from './client.js';
 import { readFilesFromDirectory, readAllFilesInBatches } from './files.js';
@@ -1279,7 +1280,7 @@ This does semantic search on the first message. You only need context_smart on s
       } else if (status === 'requires_workspace_selection') {
         const folderName = typeof (result as any).folder_name === 'string'
           ? ((result as any).folder_name as string)
-          : (typeof input.folder_path === 'string' ? input.folder_path.split('/').pop() || 'this folder' : 'this folder');
+          : (typeof input.folder_path === 'string' ? (path.basename(input.folder_path) || 'this folder') : 'this folder');
 
         const candidates = Array.isArray((result as any).workspace_candidates)
           ? ((result as any).workspace_candidates as Array<{ id?: string; name?: string; description?: string }>)
@@ -1444,7 +1445,7 @@ Behavior:
         return errorResult('Error: folder_path is required. Provide folder_path or run from a project directory.');
       }
 
-      const folderName = folderPath.split('/').pop() || 'My Project';
+      const folderName = path.basename(folderPath) || 'My Project';
 
       let newWorkspace: { id?: string; name?: string };
       try {
@@ -1944,13 +1945,14 @@ These rules instruct the AI to automatically use ContextStream for memory and co
 Supported editors: ${getAvailableEditors().join(', ')}`,
       inputSchema: z.object({
         folder_path: z.string().describe('Absolute path to the project folder'),
-        editors: z.array(z.enum(['windsurf', 'cursor', 'cline', 'kilo', 'roo', 'claude', 'aider', 'all']))
+        editors: z.array(z.enum(['codex', 'windsurf', 'cursor', 'cline', 'kilo', 'roo', 'claude', 'aider', 'all']))
           .optional()
           .describe('Which editors to generate rules for. Defaults to all.'),
         workspace_name: z.string().optional().describe('Workspace name to include in rules'),
         workspace_id: z.string().uuid().optional().describe('Workspace ID to include in rules'),
         project_name: z.string().optional().describe('Project name to include in rules'),
         additional_rules: z.string().optional().describe('Additional project-specific rules to append'),
+        mode: z.enum(['minimal', 'full']).optional().describe('Rule verbosity mode (default: minimal)'),
         dry_run: z.boolean().optional().describe('If true, return content without writing files'),
       }),
     },
@@ -1970,6 +1972,7 @@ Supported editors: ${getAvailableEditors().join(', ')}`,
           workspaceId: input.workspace_id,
           projectName: input.project_name,
           additionalRules: input.additional_rules,
+          mode: input.mode,
         });
         
         if (!rule) {

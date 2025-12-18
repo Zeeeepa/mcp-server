@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import * as path from 'node:path';
 import { z } from 'zod';
 import type { Config } from './config.js';
 import { request } from './http.js';
@@ -67,6 +68,18 @@ export class ContextStreamClient {
   // Auth
   me() {
     return request(this.config, '/auth/me');
+  }
+
+  startDeviceLogin() {
+    return request(this.config, '/auth/device/start', { method: 'POST' });
+  }
+
+  pollDeviceLogin(input: { device_code: string }) {
+    return request(this.config, '/auth/device/token', { body: input });
+  }
+
+  createApiKey(input: { name: string; permissions?: string[]; expires_at?: string | null }) {
+    return request(this.config, '/auth/api-keys', { body: input });
   }
 
   // Credits / Billing (used for plan gating)
@@ -546,7 +559,7 @@ export class ContextStreamClient {
           : 'parent_folder_mapping';
       } else {
         // No local config - try to find matching workspace by name or project
-        const folderName = rootPath?.split('/').pop()?.toLowerCase() || '';
+        const folderName = rootPath ? path.basename(rootPath).toLowerCase() : '';
         
         try {
           const workspaces = await this.listWorkspaces({ page_size: 50 }) as { 
@@ -621,9 +634,9 @@ export class ContextStreamClient {
                 name: w.name,
                 description: w.description,
               }));
-              context.message = `New folder detected: "${rootPath?.split('/').pop()}". Please select which workspace this belongs to, or create a new one.`;
+              context.message = `New folder detected: "${rootPath ? path.basename(rootPath) : 'this folder'}". Please select which workspace this belongs to, or create a new one.`;
               context.ide_roots = ideRoots;
-              context.folder_name = rootPath?.split('/').pop();
+              context.folder_name = rootPath ? path.basename(rootPath) : undefined;
               
               // Return early - agent needs to ask user
               return context;
@@ -631,7 +644,7 @@ export class ContextStreamClient {
           } else {
             // No workspaces exist yet. Ask the user for a name rather than
             // auto-creating a workspace from the folder name.
-            const folderDisplayName = rootPath?.split('/').pop() || 'this folder';
+            const folderDisplayName = rootPath ? (path.basename(rootPath) || 'this folder') : 'this folder';
 
             context.status = 'requires_workspace_name';
             context.workspace_source = 'none_found';
@@ -668,7 +681,7 @@ export class ContextStreamClient {
     // If we still couldn't resolve a workspace, do not silently continue.
     // Ask the user to select/create a workspace unless explicitly allowed.
     if (!workspaceId && !params.allow_no_workspace) {
-      const folderDisplayName = rootPath?.split('/').pop() || 'this folder';
+      const folderDisplayName = rootPath ? (path.basename(rootPath) || 'this folder') : 'this folder';
 
       context.ide_roots = ideRoots;
       context.folder_name = folderDisplayName;
@@ -713,7 +726,7 @@ export class ContextStreamClient {
     // STEP 2: Project Discovery
     // ========================================
     if (!projectId && workspaceId && rootPath && params.auto_index !== false) {
-      const projectName = rootPath.split('/').pop() || 'My Project';
+      const projectName = path.basename(rootPath) || 'My Project';
       
       try {
         // Check if a project with this name (or similar) already exists in this workspace
@@ -996,9 +1009,9 @@ export class ContextStreamClient {
 
     // Optionally create parent folder mapping (e.g., /home/user/dev/company/* -> workspace)
     if (create_parent_mapping) {
-      const parentDir = folder_path.split('/').slice(0, -1).join('/');
+      const parentDir = path.dirname(folder_path);
       addGlobalMapping({
-        pattern: `${parentDir}/*`,
+        pattern: path.join(parentDir, '*'),
         workspace_id,
         workspace_name: workspace_name || 'Unknown',
       });

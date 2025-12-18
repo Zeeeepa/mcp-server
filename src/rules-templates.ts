@@ -5,11 +5,38 @@
 
 export interface RuleTemplate {
   filename: string;
-  content: string;
   description: string;
+  build: (rules: string) => string;
 }
 
-const CONTEXTSTREAM_RULES = `
+const DEFAULT_CLAUDE_MCP_SERVER_NAME = 'contextstream';
+
+const CONTEXTSTREAM_TOOL_NAMES = [
+  'session_init',
+  'context_smart',
+  'session_summary',
+  'session_capture',
+  'session_capture_lesson',
+  'session_get_lessons',
+  'session_recall',
+  'session_remember',
+  'session_get_user_context',
+  'session_smart_search',
+  'session_compress',
+  'session_delta',
+  'generate_editor_rules',
+  'workspace_associate',
+  'workspace_bootstrap',
+] as const;
+
+function applyMcpToolPrefix(markdown: string, toolPrefix: string): string {
+  const toolPattern = CONTEXTSTREAM_TOOL_NAMES.join('|');
+  // Avoid double-prefixing tools already in the Claude format `mcp__<server>__<tool>`
+  const toolRegex = new RegExp(`(?<!__)\\b(${toolPattern})\\b`, 'g');
+  return markdown.replace(toolRegex, `${toolPrefix}$1`);
+}
+
+const CONTEXTSTREAM_RULES_FULL = `
 ## ContextStream Integration
 
 You have access to ContextStream MCP tools for persistent memory and context.
@@ -19,7 +46,7 @@ You have access to ContextStream MCP tools for persistent memory and context.
 | Message | What to Call |
 |---------|--------------|
 | **1st message** | \`session_init(folder_path="...", context_hint="<user's message>")\` |
-| **2nd+ messages** | \`context_smart(user_message="<user's message>")\` |
+| **2nd+ messages** | \`context_smart(user_message="<user's message>", max_tokens=400)\` |
 | **After completing task** | \`session_capture(...)\` - MUST capture decisions/insights |
 | **User frustration/correction** | \`session_capture_lesson(...)\` - MUST capture lessons |
 | **Command/tool error + fix** | \`session_capture_lesson(...)\` - MUST capture lessons |
@@ -43,6 +70,17 @@ You have access to ContextStream MCP tools for persistent memory and context.
 - ✅ \`context_smart\` FINDS it via semantic search
 
 **Without context_smart, you WILL miss relevant older context.**
+
+---
+
+### Recommended Token Budgets
+
+- For trivial/local edits: \`context_smart(..., max_tokens=200)\`
+- Default: \`context_smart(..., max_tokens=400)\`
+- Deep debugging/architecture or heavy “what did we decide?”: \`context_smart(..., max_tokens=800)\`
+- Keep \`format="minified"\` (default) unless you’re actively debugging tool output
+
+If context still feels missing, increase \`max_tokens\` and/or call \`session_recall\` for a focused deep lookup.
 
 ---
 
@@ -132,7 +170,7 @@ session_init(folder_path="/path/to/project", context_hint="how should I implemen
 # Returns workspace info + semantically relevant auth decisions from ANY time
 
 # Second message - user asks about database
-context_smart(user_message="what database should I use?")
+context_smart(user_message="what database should I use?", max_tokens=400)
 # Returns: W:Maker|P:myproject|D:Use PostgreSQL|D:No ORMs|M:DB schema at...
 
 # User says "Let's use Redis for caching"
@@ -146,64 +184,83 @@ session_recall(query="what did we decide about caching?")
 \`\`\`
 `.trim();
 
+const CONTEXTSTREAM_RULES_MINIMAL = `
+## ContextStream (Minimal)
+
+- First user message: \`session_init(folder_path="<cwd>", context_hint="<user_message>")\`, then answer.
+- Every user message: \`context_smart(user_message="<user_message>", format="minified", max_tokens=400)\` BEFORE answering.
+  - Use \`max_tokens=200\` for trivial/local edits, \`max_tokens=800\` for deep debugging/architecture.
+- If prior context is missing or user asks past decisions: \`session_recall(query="<question>")\`, then answer.
+- After meaningful work/decisions/preferences: \`session_capture(event_type=decision|preference|task|insight, title="…", content="…")\`.
+- On frustration/corrections/tool mistakes: \`session_capture_lesson(...)\`.
+`.trim();
+
 export const TEMPLATES: Record<string, RuleTemplate> = {
+  codex: {
+    filename: 'AGENTS.md',
+    description: 'Codex CLI agent instructions',
+    build: (rules) => `# Codex CLI Instructions
+${rules}
+`,
+  },
+
   windsurf: {
     filename: '.windsurfrules',
     description: 'Windsurf AI rules',
-    content: `# Windsurf Rules
-${CONTEXTSTREAM_RULES}
+    build: (rules) => `# Windsurf Rules
+${rules}
 `,
   },
 
   cursor: {
     filename: '.cursorrules',
     description: 'Cursor AI rules', 
-    content: `# Cursor Rules
-${CONTEXTSTREAM_RULES}
+    build: (rules) => `# Cursor Rules
+${rules}
 `,
   },
 
   cline: {
     filename: '.clinerules',
     description: 'Cline AI rules',
-    content: `# Cline Rules
-${CONTEXTSTREAM_RULES}
+    build: (rules) => `# Cline Rules
+${rules}
 `,
   },
 
   kilo: {
     filename: '.kilocode/rules/contextstream.md',
     description: 'Kilo Code AI rules',
-    content: `# Kilo Code Rules
-${CONTEXTSTREAM_RULES}
+    build: (rules) => `# Kilo Code Rules
+${rules}
 `,
   },
 
   roo: {
     filename: '.roo/rules/contextstream.md',
     description: 'Roo Code AI rules',
-    content: `# Roo Code Rules
-${CONTEXTSTREAM_RULES}
+    build: (rules) => `# Roo Code Rules
+${rules}
 `,
   },
 
   claude: {
     filename: 'CLAUDE.md',
     description: 'Claude Code instructions',
-    content: `# Claude Code Instructions
-${CONTEXTSTREAM_RULES}
+    build: (rules) => `# Claude Code Instructions
+${rules}
 `,
   },
 
   aider: {
     filename: '.aider.conf.yml',
     description: 'Aider configuration with system prompt',
-    content: `# Aider Configuration
+    build: (rules) => `# Aider Configuration
 # Note: Aider uses different config format - this adds to the system prompt
 
 # Add ContextStream guidance to conventions
 conventions: |
-${CONTEXTSTREAM_RULES.split('\n').map(line => '  ' + line).join('\n')}
+${rules.split('\n').map(line => '  ' + line).join('\n')}
 `,
   },
 };
@@ -232,12 +289,16 @@ export function generateRuleContent(
     workspaceId?: string;
     projectName?: string;
     additionalRules?: string;
+    mode?: 'minimal' | 'full';
   }
 ): { filename: string; content: string } | null {
   const template = getTemplate(editor);
   if (!template) return null;
 
-  let content = template.content;
+  const mode = options?.mode || 'minimal';
+  const rules = mode === 'full' ? CONTEXTSTREAM_RULES_FULL : CONTEXTSTREAM_RULES_MINIMAL;
+
+  let content = template.build(rules);
 
   // Add workspace header if provided
   if (options?.workspaceName || options?.projectName) {
@@ -255,6 +316,12 @@ ${options.workspaceId ? `# Workspace ID: ${options.workspaceId}` : ''}
     content += '\n\n## Project-Specific Rules\n\n' + options.additionalRules;
   }
 
+  // Claude Code requires `mcp__<server>__<tool>` naming convention for MCP tools.
+  // Other MCP clients typically use raw tool names.
+  if (editor.toLowerCase() === 'claude') {
+    content = applyMcpToolPrefix(content, `mcp__${DEFAULT_CLAUDE_MCP_SERVER_NAME}__`);
+  }
+
   return {
     filename: template.filename,
     content: content.trim() + '\n',
@@ -269,6 +336,7 @@ export function generateAllRuleFiles(options?: {
   workspaceId?: string;
   projectName?: string;
   additionalRules?: string;
+  mode?: 'minimal' | 'full';
 }): Array<{ editor: string; filename: string; content: string }> {
   return getAvailableEditors()
     .map(editor => {

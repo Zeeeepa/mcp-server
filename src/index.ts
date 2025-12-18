@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { VERSION } from './version.js';
+import { runSetupWizard } from './setup.js';
 
 /**
  * Check if this is the first run and show star message if so.
@@ -59,6 +60,10 @@ function printHelp() {
 Usage:
   npx -y @contextstream/mcp-server
   contextstream-mcp
+  contextstream-mcp setup
+
+Commands:
+  setup   Interactive onboarding wizard (rules + workspace mapping)
 
 Environment variables:
   CONTEXTSTREAM_API_URL   Base API URL (e.g. https://api.contextstream.io)
@@ -73,6 +78,9 @@ Examples:
   CONTEXTSTREAM_API_URL="https://api.contextstream.io" \\
   CONTEXTSTREAM_API_KEY="your_api_key" \\
   npx -y @contextstream/mcp-server
+
+Setup wizard:
+  npx -y @contextstream/mcp-server setup
 
 Notes:
   - When used from an MCP client (e.g. Codex, Cursor, VS Code),
@@ -90,6 +98,11 @@ async function main() {
 
   if (args.includes('--version') || args.includes('-v')) {
     console.log(`contextstream-mcp v${VERSION}`);
+    return;
+  }
+
+  if (args[0] === 'setup') {
+    await runSetupWizard(args.slice(1));
     return;
   }
 
