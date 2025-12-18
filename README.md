@@ -68,9 +68,15 @@ contextstream-mcp
 
 ## Configure your MCP client
 
-### Cursor / VS Code / Windsurf / Claude Desktop (JSON)
+### Manual setup
 
-Add to your MCP config:
+If you ran the [setup wizard](#setup-wizard-recommended), you can usually skip this section.
+
+If you prefer to configure things by hand (or your tool can’t be auto-configured), add the ContextStream MCP server to your client using one of the examples below.
+
+### JSON MCP config (`mcpServers`)
+
+Used by Claude Desktop, Cursor, Windsurf, Cline, Kilo, Roo, and Claude Code project scope (`.mcp.json`).
 
 ```json
 {
@@ -86,6 +92,41 @@ Add to your MCP config:
   }
 }
 ```
+
+### VS Code (native MCP) (`servers`)
+
+VS Code uses a different schema in `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "contextstream": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@contextstream/mcp-server"],
+      "env": {
+        "CONTEXTSTREAM_API_URL": "https://api.contextstream.io",
+        "CONTEXTSTREAM_API_KEY": "your_api_key"
+      }
+    }
+  }
+}
+```
+
+> Tip: VS Code supports inputs so you don’t have to hardcode secrets in a committed file.
+
+### Claude Code (CLI)
+
+User scope (all projects):
+
+```bash
+claude mcp add --transport stdio contextstream --scope user \
+  --env CONTEXTSTREAM_API_URL=https://api.contextstream.io \
+  --env CONTEXTSTREAM_API_KEY=YOUR_KEY -- \
+  npx -y @contextstream/mcp-server
+```
+
+Windows caveat (native Windows, not WSL): if `npx` isn’t found, use `cmd /c npx -y @contextstream/mcp-server` after `--`.
 
 ### Codex CLI (`~/.codex/config.toml`)
 

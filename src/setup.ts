@@ -129,6 +129,25 @@ function buildContextStreamMcpServer(params: { apiUrl: string; apiKey: string })
   };
 }
 
+type VsCodeServerJson = {
+  type: 'stdio';
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+};
+
+function buildContextStreamVsCodeServer(params: { apiUrl: string; apiKey: string }): VsCodeServerJson {
+  return {
+    type: 'stdio',
+    command: 'npx',
+    args: ['-y', '@contextstream/mcp-server'],
+    env: {
+      CONTEXTSTREAM_API_URL: params.apiUrl,
+      CONTEXTSTREAM_API_KEY: params.apiKey,
+    },
+  };
+}
+
 function stripJsonComments(input: string): string {
   return (
     input
@@ -175,6 +194,30 @@ async function upsertJsonMcpConfig(filePath: string, server: McpServerJson): Pro
   const before = JSON.stringify(root.mcpServers.contextstream ?? null);
   root.mcpServers.contextstream = server;
   const after = JSON.stringify(root.mcpServers.contextstream ?? null);
+
+  await fs.writeFile(filePath, JSON.stringify(root, null, 2) + '\n', 'utf8');
+  if (!exists) return 'created';
+  return before === after ? 'skipped' : 'updated';
+}
+
+async function upsertJsonVsCodeMcpConfig(filePath: string, server: VsCodeServerJson): Promise<'created' | 'updated' | 'skipped'> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const exists = await fileExists(filePath);
+
+  let root: any = {};
+  if (exists) {
+    const raw = await fs.readFile(filePath, 'utf8').catch(() => '');
+    const parsed = tryParseJsonLike(raw);
+    if (!parsed.ok) throw new Error(`Invalid JSON in ${filePath}: ${parsed.error}`);
+    root = parsed.value;
+  }
+
+  if (!root || typeof root !== 'object' || Array.isArray(root)) root = {};
+  if (!root.servers || typeof root.servers !== 'object' || Array.isArray(root.servers)) root.servers = {};
+
+  const before = JSON.stringify(root.servers.contextstream ?? null);
+  root.servers.contextstream = server;
+  const after = JSON.stringify(root.servers.contextstream ?? null);
 
   await fs.writeFile(filePath, JSON.stringify(root, null, 2) + '\n', 'utf8');
   if (!exists) return 'created';
@@ -533,6 +576,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
             : 'both';
 
     const mcpServer = buildContextStreamMcpServer({ apiUrl, apiKey });
+    const vsCodeServer = buildContextStreamVsCodeServer({ apiUrl, apiKey });
 
     // Global MCP config
     if (mcpScope === 'global' || mcpScope === 'both') {
@@ -565,7 +609,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
             continue;
           }
 
-          if (editor === 'claude') {
+	          if (editor === 'claude') {
             const desktopPath = claudeDesktopConfigPath();
             if (desktopPath) {
               const useDesktop =
@@ -582,17 +626,27 @@ export async function runSetupWizard(args: string[]): Promise<void> {
               }
             }
 
-            console.log('- Claude Code: global MCP config is best done via `claude mcp add --scope user ...` (see docs).');
-            continue;
-          }
+	            console.log('- Claude Code: global MCP config is best done via `claude mcp add --transport stdio ...` (see docs).');
+	            console.log('  macOS/Linux: claude mcp add --transport stdio contextstream --scope user --env CONTEXTSTREAM_API_URL=... --env CONTEXTSTREAM_API_KEY=... -- npx -y @contextstream/mcp-server');
+	            console.log('  Windows (native): use `cmd /c npx -y @contextstream/mcp-server` after `--` if `npx` is not found.');
+	            continue;
+	          }
 
-          if (editor === 'cursor') {
-            console.log(`- ${EDITOR_LABELS[editor]}: MCP config is project-based (skipping global).`);
-            continue;
-          }
-          if (editor === 'cline') {
-            console.log(`- ${EDITOR_LABELS[editor]}: MCP config is managed via the extension UI (skipping global).`);
-            continue;
+	          if (editor === 'cursor') {
+	            const filePath = path.join(homedir(), '.cursor', 'mcp.json');
+	            if (dryRun) {
+	              writeActions.push({ kind: 'mcp-config', target: filePath, status: 'dry-run' });
+	              console.log(`- ${EDITOR_LABELS[editor]}: would update ${filePath}`);
+	              continue;
+	            }
+	            const status = await upsertJsonMcpConfig(filePath, mcpServer);
+	            writeActions.push({ kind: 'mcp-config', target: filePath, status });
+	            console.log(`- ${EDITOR_LABELS[editor]}: ${status} ${filePath}`);
+	            continue;
+	          }
+	          if (editor === 'cline') {
+	            console.log(`- ${EDITOR_LABELS[editor]}: MCP config is managed via the extension UI (skipping global).`);
+	            continue;
           }
           if (editor === 'kilo' || editor === 'roo') {
             console.log(`- ${EDITOR_LABELS[editor]}: project MCP config supported via file; global is managed via the app UI.`);
@@ -718,20 +772,20 @@ export async function runSetupWizard(args: string[]): Promise<void> {
       if (mcpScope === 'project' || mcpScope === 'both') {
         for (const editor of selectedEditors) {
           try {
-            if (editor === 'cursor') {
-              const cursorPath = path.join(projectPath, '.cursor', 'mcp.json');
-              const vscodePath = path.join(projectPath, '.vscode', 'mcp.json');
-              if (dryRun) {
-                writeActions.push({ kind: 'mcp-config', target: cursorPath, status: 'dry-run' });
-                writeActions.push({ kind: 'mcp-config', target: vscodePath, status: 'dry-run' });
-              } else {
-                const status1 = await upsertJsonMcpConfig(cursorPath, mcpServer);
-                const status2 = await upsertJsonMcpConfig(vscodePath, mcpServer);
-                writeActions.push({ kind: 'mcp-config', target: cursorPath, status: status1 });
-                writeActions.push({ kind: 'mcp-config', target: vscodePath, status: status2 });
-              }
-              continue;
-            }
+	          if (editor === 'cursor') {
+	            const cursorPath = path.join(projectPath, '.cursor', 'mcp.json');
+	            const vscodePath = path.join(projectPath, '.vscode', 'mcp.json');
+	            if (dryRun) {
+	              writeActions.push({ kind: 'mcp-config', target: cursorPath, status: 'dry-run' });
+	              writeActions.push({ kind: 'mcp-config', target: vscodePath, status: 'dry-run' });
+	            } else {
+	              const status1 = await upsertJsonMcpConfig(cursorPath, mcpServer);
+	              const status2 = await upsertJsonVsCodeMcpConfig(vscodePath, vsCodeServer);
+	              writeActions.push({ kind: 'mcp-config', target: cursorPath, status: status1 });
+	              writeActions.push({ kind: 'mcp-config', target: vscodePath, status: status2 });
+	            }
+	            continue;
+	          }
 
             if (editor === 'claude') {
               const mcpPath = path.join(projectPath, '.mcp.json');
