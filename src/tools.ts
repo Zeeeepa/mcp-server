@@ -14,6 +14,9 @@ type ToolTextResult = {
   isError?: boolean;
 };
 
+const LESSON_DEDUP_WINDOW_MS = 2 * 60 * 1000;
+const recentLessonCaptures = new Map<string, number>();
+
 function formatContent(data: unknown) {
   return JSON.stringify(data, null, 2);
 }
@@ -23,6 +26,44 @@ function toStructured(data: unknown): StructuredContent {
     return data as { [x: string]: unknown };
   }
   return undefined;
+}
+
+function normalizeLessonField(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function buildLessonSignature(input: {
+  title: string;
+  category: string;
+  trigger: string;
+  impact: string;
+  prevention: string;
+}, workspaceId: string, projectId?: string) {
+  return [
+    workspaceId,
+    projectId || 'global',
+    input.category,
+    input.title,
+    input.trigger,
+    input.impact,
+    input.prevention,
+  ].map(normalizeLessonField).join('|');
+}
+
+function isDuplicateLessonCapture(signature: string) {
+  const now = Date.now();
+  for (const [key, ts] of recentLessonCaptures) {
+    if (now - ts > LESSON_DEDUP_WINDOW_MS) {
+      recentLessonCaptures.delete(key);
+    }
+  }
+  const last = recentLessonCaptures.get(signature);
+  if (last && now - last < LESSON_DEDUP_WINDOW_MS) {
+    recentLessonCaptures.set(signature, now);
+    return true;
+  }
+  recentLessonCaptures.set(signature, now);
+  return false;
 }
 
 export function registerTools(server: McpServer, client: ContextStreamClient, sessionManager?: SessionManager) {
@@ -1659,6 +1700,27 @@ The lesson will be tagged with 'lesson' and stored with structured metadata for 
             text: 'Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.'
           }],
           isError: true,
+        };
+      }
+
+      const lessonSignature = buildLessonSignature({
+        title: input.title,
+        category: input.category,
+        trigger: input.trigger,
+        impact: input.impact,
+        prevention: input.prevention,
+      }, workspaceId, projectId);
+
+      if (isDuplicateLessonCapture(lessonSignature)) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `ℹ️ Duplicate lesson capture ignored: "${input.title}" was already recorded recently.`
+          }],
+          structuredContent: {
+            deduped: true,
+            title: input.title,
+          },
         };
       }
 
