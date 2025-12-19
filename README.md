@@ -47,7 +47,9 @@ npx -y @contextstream/mcp-server setup
 ```
 
 Notes:
-- Uses browser/device login by default and creates an API key for you (stored locally in the config files it writes).
+- Uses browser/device login by default and creates an API key for you.
+- To avoid re-auth prompts on subsequent runs, the wizard saves that API key to `~/.contextstream/credentials.json` (and also writes it into the MCP config files it generates). Delete that file to force a fresh login.
+- Codex CLI MCP config is global-only (`~/.codex/config.toml`), so the wizard will always write Codex config globally when selected.
 - Some tools still require UI/CLI-based MCP setup (the wizard will tell you when it can’t write a config).
 - Preview changes without writing files: `npx -y @contextstream/mcp-server setup --dry-run`
 

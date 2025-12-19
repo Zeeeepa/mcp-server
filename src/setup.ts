@@ -9,6 +9,7 @@ import type { Config } from './config.js';
 import { HttpError } from './http.js';
 import { generateRuleContent } from './rules-templates.js';
 import { VERSION } from './version.js';
+import { credentialsFilePath, normalizeApiUrl, readSavedCredentials, writeSavedCredentials } from './credentials.js';
 
 type RuleMode = 'minimal' | 'full';
 type InstallScope = 'global' | 'project' | 'both';
@@ -34,6 +35,10 @@ const EDITOR_LABELS: Record<EditorKey, string> = {
   roo: 'Roo Code',
   aider: 'Aider',
 };
+
+function supportsProjectMcpConfig(editor: EditorKey): boolean {
+  return editor === 'cursor' || editor === 'claude' || editor === 'kilo' || editor === 'roo';
+}
 
 function normalizeInput(value: string): string {
   return value.trim();
@@ -352,18 +357,35 @@ export async function runSetupWizard(args: string[]): Promise<void> {
     if (dryRun) console.log('DRY RUN: no files will be written.\n');
     else console.log('');
 
-    const apiUrlDefault = process.env.CONTEXTSTREAM_API_URL || 'https://api.contextstream.io';
-    const apiUrl = normalizeInput(
-      await rl.question(`ContextStream API URL [${apiUrlDefault}]: `)
-    ) || apiUrlDefault;
+    const savedCreds = await readSavedCredentials();
+    const apiUrlDefault = normalizeApiUrl(process.env.CONTEXTSTREAM_API_URL || savedCreds?.api_url || 'https://api.contextstream.io');
+    const apiUrl = normalizeApiUrl(
+      normalizeInput(await rl.question(`ContextStream API URL [${apiUrlDefault}]: `)) || apiUrlDefault
+    );
 
     let apiKey = normalizeInput(process.env.CONTEXTSTREAM_API_KEY || '');
+    let apiKeySource: 'env' | 'saved' | 'paste' | 'browser' | 'unknown' = apiKey ? 'env' : 'unknown';
 
     if (apiKey) {
       const confirm = normalizeInput(
         await rl.question(`Use CONTEXTSTREAM_API_KEY from environment (${maskApiKey(apiKey)})? [Y/n]: `)
       );
-      if (confirm.toLowerCase() === 'n' || confirm.toLowerCase() === 'no') apiKey = '';
+      if (confirm.toLowerCase() === 'n' || confirm.toLowerCase() === 'no') {
+        apiKey = '';
+        apiKeySource = 'unknown';
+      }
+    }
+
+    if (!apiKey && savedCreds?.api_key && normalizeApiUrl(savedCreds.api_url) === apiUrl) {
+      const confirm = normalizeInput(
+        await rl.question(
+          `Use saved API key from ${credentialsFilePath()} (${maskApiKey(savedCreds.api_key)})? [Y/n]: `
+        )
+      );
+      if (!(confirm.toLowerCase() === 'n' || confirm.toLowerCase() === 'no')) {
+        apiKey = savedCreds.api_key;
+        apiKeySource = 'saved';
+      }
     }
 
     if (!apiKey) {
@@ -376,6 +398,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
         console.log('\nYou need a ContextStream API key to continue.');
         console.log('Create one here (then paste it): https://app.contextstream.io/settings/api-keys\n');
         apiKey = normalizeInput(await rl.question('CONTEXTSTREAM_API_KEY: '));
+        apiKeySource = 'paste';
       } else {
         const anonClient = new ContextStreamClient(buildClientConfig({ apiUrl }));
         let device: any;
@@ -455,6 +478,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
         }
 
         apiKey = createdKey.secret_key.trim();
+        apiKeySource = 'browser';
         console.log(`\nCreated API key: ${maskApiKey(apiKey)}\n`);
       }
     }
@@ -478,6 +502,18 @@ export async function runSetupWizard(args: string[]): Promise<void> {
           : undefined;
 
     console.log(`Authenticated as: ${email || 'unknown user'} (${maskApiKey(apiKey)})\n`);
+
+    // Persist for future setup runs so users don't have to log in again.
+    // (The MCP config files we write also include the API key, but setup itself should be able to reuse it.)
+    if (!dryRun && (apiKeySource === 'browser' || apiKeySource === 'paste')) {
+      try {
+        const saved = await writeSavedCredentials({ apiUrl, apiKey, email });
+        console.log(`Saved API key for future runs: ${saved.path} (${maskApiKey(apiKey)})\n`);
+      } catch (err: any) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(`Warning: failed to save API key for future runs (${credentialsFilePath()}): ${msg}\n`);
+      }
+    }
 
     // Workspace selection
     let workspaceId: string | undefined;
@@ -552,6 +588,8 @@ export async function runSetupWizard(args: string[]): Promise<void> {
     const selectedRaw = normalizeInput(await rl.question('Editors [all]: ')) || 'all';
     const selectedNums = parseNumberList(selectedRaw, editors.length);
     const selectedEditors = selectedNums.length ? selectedNums.map((n) => editors[n - 1]) : editors;
+    const hasCodex = selectedEditors.includes('codex');
+    const hasProjectMcpEditors = selectedEditors.some((e) => supportsProjectMcpConfig(e));
 
     console.log('\nInstall rules as:');
     console.log('  1) Global');
@@ -561,27 +599,42 @@ export async function runSetupWizard(args: string[]): Promise<void> {
     const scope: InstallScope = scopeChoice === '1' ? 'global' : scopeChoice === '2' ? 'project' : 'both';
 
     console.log('\nInstall MCP server config as:');
-    console.log('  1) Global');
-    console.log('  2) Project');
-    console.log('  3) Both');
-    console.log('  4) Skip (rules only)');
-    const mcpChoice = normalizeInput(await rl.question('Choose [1/2/3/4] (default 3): ')) || '3';
+    if (hasCodex && !hasProjectMcpEditors) {
+      console.log('  1) Global (Codex CLI supports global config only)');
+      console.log('  2) Skip (rules only)');
+    } else {
+      console.log('  1) Global');
+      console.log('  2) Project');
+      console.log('  3) Both');
+      console.log('  4) Skip (rules only)');
+      if (hasCodex) {
+        console.log('  Note: Codex CLI does not support per-project MCP config; it will be configured globally if selected.');
+      }
+    }
+
+    const mcpChoiceDefault = hasCodex && !hasProjectMcpEditors ? '1' : '3';
+    const mcpChoice = normalizeInput(await rl.question(`Choose [${hasCodex && !hasProjectMcpEditors ? '1/2' : '1/2/3/4'}] (default ${mcpChoiceDefault}): `)) || mcpChoiceDefault;
     const mcpScope: McpScope =
-      mcpChoice === '4'
+      mcpChoice === '2' && hasCodex && !hasProjectMcpEditors
         ? 'skip'
-        : mcpChoice === '1'
-          ? 'global'
-          : mcpChoice === '2'
-            ? 'project'
-            : 'both';
+        : mcpChoice === '4'
+          ? 'skip'
+          : mcpChoice === '1'
+            ? 'global'
+            : mcpChoice === '2'
+              ? 'project'
+              : 'both';
 
     const mcpServer = buildContextStreamMcpServer({ apiUrl, apiKey });
     const vsCodeServer = buildContextStreamVsCodeServer({ apiUrl, apiKey });
 
     // Global MCP config
-    if (mcpScope === 'global' || mcpScope === 'both') {
+    const needsGlobalMcpConfig = mcpScope === 'global' || mcpScope === 'both' || (mcpScope === 'project' && hasCodex);
+    if (needsGlobalMcpConfig) {
       console.log('\nInstalling global MCP config...');
       for (const editor of selectedEditors) {
+        // If user selected Project-only, only Codex gets a global config (it has no per-project option).
+        if (mcpScope === 'project' && editor !== 'codex') continue;
         try {
           if (editor === 'codex') {
             const filePath = path.join(homedir(), '.codex', 'config.toml');
@@ -694,7 +747,10 @@ export async function runSetupWizard(args: string[]): Promise<void> {
 
     // Project rules + workspace mapping
     const projectPaths = new Set<string>();
-    const needsProjects = scope === 'project' || scope === 'both' || mcpScope === 'project' || mcpScope === 'both';
+    const needsProjects =
+      scope === 'project' ||
+      scope === 'both' ||
+      ((mcpScope === 'project' || mcpScope === 'both') && hasProjectMcpEditors);
 
     if (needsProjects) {
       console.log('\nProject setup...');
