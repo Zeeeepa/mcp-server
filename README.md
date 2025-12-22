@@ -156,9 +156,13 @@ User scope (all projects):
 ```bash
 claude mcp add --transport stdio contextstream --scope user \
   --env CONTEXTSTREAM_API_URL=https://api.contextstream.io \
-  --env CONTEXTSTREAM_API_KEY=YOUR_KEY -- \
+  --env CONTEXTSTREAM_API_KEY=YOUR_KEY \
+  --env CONTEXTSTREAM_TOOLSET=core -- \
   npx -y @contextstream/mcp-server
 ```
+
+Tip: Claude Code warns on large tool contexts. Use `CONTEXTSTREAM_TOOLSET=core` to reduce the tool list.
+Set `CONTEXTSTREAM_TOOLSET=full` to expose everything.
 
 Windows caveat (native Windows, not WSL): if `npx` isn’t found, use `cmd /c npx -y @contextstream/mcp-server` after `--`.
 
@@ -166,7 +170,7 @@ Alternative (JSON form):
 
 ```bash
 claude mcp add-json contextstream \
-'{"type":"stdio","command":"npx","args":["-y","@contextstream/mcp-server"],"env":{"CONTEXTSTREAM_API_URL":"https://api.contextstream.io","CONTEXTSTREAM_API_KEY":"your_api_key"}}'
+'{"type":"stdio","command":"npx","args":["-y","@contextstream/mcp-server"],"env":{"CONTEXTSTREAM_API_URL":"https://api.contextstream.io","CONTEXTSTREAM_API_KEY":"your_api_key","CONTEXTSTREAM_TOOLSET":"core"}}'
 ```
 
 ### Codex CLI (`~/.codex/config.toml`)
@@ -200,6 +204,8 @@ You can authenticate using either:
 | `CONTEXTSTREAM_WORKSPACE_ID` | No | Default workspace ID fallback |
 | `CONTEXTSTREAM_PROJECT_ID` | No | Default project ID fallback |
 | `CONTEXTSTREAM_USER_AGENT` | No | Custom user agent string |
+| `CONTEXTSTREAM_TOOLSET` | No | Tool bundle to expose (`full` or `core`) |
+| `CONTEXTSTREAM_TOOL_ALLOWLIST` | No | Comma-separated tool names to expose (overrides toolset) |
 | `CONTEXTSTREAM_PRO_TOOLS` | No | Comma-separated tool names treated as PRO (default: `ai_context,ai_enhanced_context,ai_context_budget,ai_embeddings,ai_plan,ai_tasks`) |
 | `CONTEXTSTREAM_UPGRADE_URL` | No | Upgrade link shown when Free users call PRO tools (default: `https://contextstream.io/pricing`) |
 

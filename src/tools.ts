@@ -18,6 +18,71 @@ type ToolTextResult = {
 const LESSON_DEDUP_WINDOW_MS = 2 * 60 * 1000;
 const recentLessonCaptures = new Map<string, number>();
 
+const CORE_TOOLSET = new Set<string>([
+  'session_init',
+  'context_smart',
+  'session_summary',
+  'session_capture',
+  'session_capture_lesson',
+  'session_get_lessons',
+  'session_recall',
+  'session_remember',
+  'session_get_user_context',
+  'session_smart_search',
+  'session_compress',
+  'session_delta',
+  'generate_editor_rules',
+  'workspace_associate',
+  'workspace_bootstrap',
+  'auth_me',
+  'mcp_server_version',
+]);
+
+const TOOLSET_ALIASES: Record<string, Set<string>> = {
+  core: CORE_TOOLSET,
+  minimal: CORE_TOOLSET,
+  essential: CORE_TOOLSET,
+};
+
+function parseToolList(raw: string): Set<string> {
+  return new Set(
+    raw
+      .split(',')
+      .map((tool) => tool.trim())
+      .filter(Boolean)
+  );
+}
+
+function resolveToolFilter(): { allowlist: Set<string> | null; source: string | null } {
+  const allowlistRaw = process.env.CONTEXTSTREAM_TOOL_ALLOWLIST;
+  if (allowlistRaw) {
+    const allowlist = parseToolList(allowlistRaw);
+    if (allowlist.size === 0) {
+      console.error('[ContextStream] CONTEXTSTREAM_TOOL_ALLOWLIST is empty; using full tool list.');
+      return { allowlist: null, source: null };
+    }
+    return { allowlist, source: 'allowlist' };
+  }
+
+  const toolsetRaw = process.env.CONTEXTSTREAM_TOOLSET;
+  if (!toolsetRaw) {
+    return { allowlist: null, source: null };
+  }
+
+  const key = toolsetRaw.trim().toLowerCase();
+  if (!key || key === 'full' || key === 'all') {
+    return { allowlist: null, source: 'full' };
+  }
+
+  const resolved = TOOLSET_ALIASES[key];
+  if (resolved) {
+    return { allowlist: resolved, source: key };
+  }
+
+  console.error(`[ContextStream] Unknown CONTEXTSTREAM_TOOLSET "${toolsetRaw}". Using full tool list.`);
+  return { allowlist: null, source: null };
+}
+
 function formatContent(data: unknown) {
   return JSON.stringify(data, null, 2);
 }
@@ -69,6 +134,12 @@ function isDuplicateLessonCapture(signature: string) {
 
 export function registerTools(server: McpServer, client: ContextStreamClient, sessionManager?: SessionManager) {
   const upgradeUrl = process.env.CONTEXTSTREAM_UPGRADE_URL || 'https://contextstream.io/pricing';
+  const toolFilter = resolveToolFilter();
+  const toolAllowlist = toolFilter.allowlist;
+  if (toolAllowlist) {
+    const source = toolFilter.source ?? 'custom';
+    console.error(`[ContextStream] Toolset limited (${source}): ${toolAllowlist.size} tools.`);
+  }
   const defaultProTools = new Set<string>([
     // AI endpoints (typically paid/credit-metered)
     'ai_context',
@@ -189,6 +260,9 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     config: { title: string; description: string; inputSchema: T },
     handler: (input: z.infer<T>) => Promise<ToolTextResult>
   ) {
+    if (toolAllowlist && !toolAllowlist.has(name)) {
+      return;
+    }
     const accessLabel = getToolAccessLabel(name);
     const labeledConfig = {
       ...config,
@@ -311,7 +385,7 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     'workspaces_list',
     {
       title: 'List workspaces',
-      description: 'List accessible workspaces',
+      description: 'List accessible workspaces (paginated list: items, total, page, per_page, has_next, has_prev).',
       inputSchema: z.object({ page: z.number().optional(), page_size: z.number().optional() }),
     },
     async (input) => {
@@ -324,7 +398,7 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     'workspaces_create',
     {
       title: 'Create workspace',
-      description: 'Create a new workspace',
+      description: 'Create a new workspace (returns ApiResponse with created workspace in data).',
       inputSchema: z.object({
         name: z.string(),
         description: z.string().optional(),
@@ -332,7 +406,7 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
       }),
     },
     async (input) => {
-      const result = await client.createWorkspace(input);
+      const result = await client.createWorkspace(input, { unwrap: false });
       return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
     }
   );
@@ -376,7 +450,7 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     'projects_list',
     {
       title: 'List projects',
-      description: 'List projects (optionally by workspace)',
+      description: 'List projects (optionally by workspace; paginated list: items, total, page, per_page, has_next, has_prev).',
       inputSchema: z.object({ workspace_id: z.string().uuid().optional(), page: z.number().optional(), page_size: z.number().optional() }),
     },
     async (input) => {
@@ -389,7 +463,7 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     'projects_create',
     {
       title: 'Create project',
-      description: 'Create a project within a workspace',
+      description: 'Create a project within a workspace (returns ApiResponse with created project in data).',
       inputSchema: z.object({
         name: z.string(),
         description: z.string().optional(),
@@ -397,7 +471,7 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
       }),
     },
     async (input) => {
-      const result = await client.createProject(input);
+      const result = await client.createProject(input, { unwrap: false });
       return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
     }
   );
@@ -1034,7 +1108,7 @@ Automatically detects code files and skips ignored directories like node_modules
     'workspaces_content',
     {
       title: 'Workspace content',
-      description: 'List content in a workspace',
+      description: 'List content in a workspace (paginated list: items, total, page, per_page, has_next, has_prev).',
       inputSchema: z.object({ workspace_id: z.string().uuid().optional() }),
     },
     async (input) => {

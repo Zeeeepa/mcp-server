@@ -123,14 +123,18 @@ type McpServerJson = {
   env: Record<string, string>;
 };
 
-function buildContextStreamMcpServer(params: { apiUrl: string; apiKey: string }): McpServerJson {
+function buildContextStreamMcpServer(params: { apiUrl: string; apiKey: string; toolset?: string }): McpServerJson {
+  const env: Record<string, string> = {
+    CONTEXTSTREAM_API_URL: params.apiUrl,
+    CONTEXTSTREAM_API_KEY: params.apiKey,
+  };
+  if (params.toolset) {
+    env.CONTEXTSTREAM_TOOLSET = params.toolset;
+  }
   return {
     command: 'npx',
     args: ['-y', '@contextstream/mcp-server'],
-    env: {
-      CONTEXTSTREAM_API_URL: params.apiUrl,
-      CONTEXTSTREAM_API_KEY: params.apiKey,
-    },
+    env,
   };
 }
 
@@ -141,15 +145,19 @@ type VsCodeServerJson = {
   env: Record<string, string>;
 };
 
-function buildContextStreamVsCodeServer(params: { apiUrl: string; apiKey: string }): VsCodeServerJson {
+function buildContextStreamVsCodeServer(params: { apiUrl: string; apiKey: string; toolset?: string }): VsCodeServerJson {
+  const env: Record<string, string> = {
+    CONTEXTSTREAM_API_URL: params.apiUrl,
+    CONTEXTSTREAM_API_KEY: params.apiKey,
+  };
+  if (params.toolset) {
+    env.CONTEXTSTREAM_TOOLSET = params.toolset;
+  }
   return {
     type: 'stdio',
     command: 'npx',
     args: ['-y', '@contextstream/mcp-server'],
-    env: {
-      CONTEXTSTREAM_API_URL: params.apiUrl,
-      CONTEXTSTREAM_API_KEY: params.apiKey,
-    },
+    env,
   };
 }
 
@@ -626,6 +634,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
               : 'both';
 
     const mcpServer = buildContextStreamMcpServer({ apiUrl, apiKey });
+    const mcpServerClaude = buildContextStreamMcpServer({ apiUrl, apiKey, toolset: 'core' });
     const vsCodeServer = buildContextStreamVsCodeServer({ apiUrl, apiKey });
 
     // Global MCP config
@@ -672,7 +681,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
                   writeActions.push({ kind: 'mcp-config', target: desktopPath, status: 'dry-run' });
                   console.log(`- Claude Desktop: would update ${desktopPath}`);
                 } else {
-                  const status = await upsertJsonMcpConfig(desktopPath, mcpServer);
+                  const status = await upsertJsonMcpConfig(desktopPath, mcpServerClaude);
                   writeActions.push({ kind: 'mcp-config', target: desktopPath, status });
                   console.log(`- Claude Desktop: ${status} ${desktopPath}`);
                 }
@@ -680,7 +689,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
             }
 
 	            console.log('- Claude Code: global MCP config is best done via `claude mcp add --transport stdio ...` (see docs).');
-	            console.log('  macOS/Linux: claude mcp add --transport stdio contextstream --scope user --env CONTEXTSTREAM_API_URL=... --env CONTEXTSTREAM_API_KEY=... -- npx -y @contextstream/mcp-server');
+	            console.log('  macOS/Linux: claude mcp add --transport stdio contextstream --scope user --env CONTEXTSTREAM_API_URL=... --env CONTEXTSTREAM_API_KEY=... --env CONTEXTSTREAM_TOOLSET=core -- npx -y @contextstream/mcp-server');
 	            console.log('  Windows (native): use `cmd /c npx -y @contextstream/mcp-server` after `--` if `npx` is not found.');
 	            continue;
 	          }
@@ -848,7 +857,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
               if (dryRun) {
                 writeActions.push({ kind: 'mcp-config', target: mcpPath, status: 'dry-run' });
               } else {
-                const status = await upsertJsonMcpConfig(mcpPath, mcpServer);
+                const status = await upsertJsonMcpConfig(mcpPath, mcpServerClaude);
                 writeActions.push({ kind: 'mcp-config', target: mcpPath, status });
               }
               continue;
