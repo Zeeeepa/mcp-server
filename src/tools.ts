@@ -744,8 +744,8 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
       title: 'Knowledge path',
       description: 'Find path between two nodes',
       inputSchema: z.object({
-        source_id: z.string(),
-        target_id: z.string(),
+        source_id: z.string().uuid(),
+        target_id: z.string().uuid(),
         workspace_id: z.string().uuid().optional(),
         project_id: z.string().uuid().optional(),
       }),
