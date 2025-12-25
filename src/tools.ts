@@ -2088,13 +2088,14 @@ Example: "Remember that I prefer TypeScript strict mode" or "Remember we decided
         workspace_id: z.string().uuid().optional(),
         project_id: z.string().uuid().optional(),
         importance: z.enum(['low', 'medium', 'high']).optional(),
+        await_indexing: z.boolean().optional().describe('If true, wait for indexing to complete before returning. This ensures the content is immediately searchable.'),
       }),
     },
     async (input) => {
       // Get workspace_id from session context if not provided
       let workspaceId = input.workspace_id;
       let projectId = input.project_id;
-      
+
       if (!workspaceId && sessionManager) {
         const ctx = sessionManager.getContext();
         if (ctx) {
@@ -2102,32 +2103,20 @@ Example: "Remember that I prefer TypeScript strict mode" or "Remember we decided
           projectId = projectId || ctx.project_id as string | undefined;
         }
       }
-      
+
       if (!workspaceId) {
-        return { 
+        return {
           content: [{ type: 'text' as const, text: 'Error: workspace_id is required. Please call session_init first.' }],
           isError: true,
         };
       }
-      
-      // Auto-detect type from content
-      const lowerContent = input.content.toLowerCase();
-      let eventType: 'preference' | 'decision' | 'insight' | 'task' = 'insight';
-      if (lowerContent.includes('prefer') || lowerContent.includes('like') || lowerContent.includes('always')) {
-        eventType = 'preference';
-      } else if (lowerContent.includes('decided') || lowerContent.includes('decision') || lowerContent.includes('chose')) {
-        eventType = 'decision';
-      } else if (lowerContent.includes('todo') || lowerContent.includes('task') || lowerContent.includes('need to')) {
-        eventType = 'task';
-      }
 
-      const result = await client.captureContext({
+      const result = await client.sessionRemember({
+        content: input.content,
         workspace_id: workspaceId,
         project_id: projectId,
-        event_type: eventType,
-        title: input.content.slice(0, 100),
-        content: input.content,
-        importance: input.importance || 'medium',
+        importance: input.importance,
+        await_indexing: input.await_indexing,
       });
       return { content: [{ type: 'text' as const, text: `Remembered: ${input.content.slice(0, 100)}...` }], structuredContent: toStructured(result) };
     }

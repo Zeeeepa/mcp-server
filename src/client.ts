@@ -1552,6 +1552,34 @@ export class ContextStreamClient {
   }
 
   /**
+   * Remember something using the session/remember endpoint.
+   * This is a simpler interface than captureContext and supports await_indexing.
+   */
+  async sessionRemember(params: {
+    content: string;
+    workspace_id?: string;
+    project_id?: string;
+    importance?: 'low' | 'medium' | 'high';
+    await_indexing?: boolean;
+  }) {
+    const withDefaults = this.withDefaults(params);
+
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for session_remember. Set defaultWorkspaceId in config or provide workspace_id.');
+    }
+
+    return request(this.config, '/session/remember', {
+      body: {
+        content: params.content,
+        workspace_id: withDefaults.workspace_id,
+        project_id: withDefaults.project_id,
+        importance: params.importance,
+        await_indexing: params.await_indexing,
+      },
+    });
+  }
+
+  /**
    * Search memory with automatic context enrichment.
    * Returns both direct matches and related context.
    */
