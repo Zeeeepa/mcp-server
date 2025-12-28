@@ -2999,4 +2999,80 @@ export class ContextStreamClient {
     if (params?.limit) query.set('limit', String(params.limit));
     return request(this.config, `/workspaces/${withDefaults.workspace_id}/github/search?${query.toString()}`, { method: 'GET' });
   }
+
+  /**
+   * Get knowledge extracted from GitHub (decisions, lessons, insights)
+   */
+  async githubKnowledge(params: {
+    workspace_id?: string;
+    limit?: number;
+    node_type?: string;
+  }): Promise<Array<{
+    id: string;
+    node_type: string;
+    title: string;
+    summary: string;
+    confidence: number;
+    source_type: string;
+    occurred_at: string;
+    tags: string[];
+  }>> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for GitHub knowledge');
+    }
+    const query = new URLSearchParams();
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.node_type) query.set('node_type', params.node_type);
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/github/knowledge${suffix}`, { method: 'GET' });
+  }
+
+  /**
+   * Get knowledge extracted from Slack (decisions, lessons, insights)
+   */
+  async slackKnowledge(params: {
+    workspace_id?: string;
+    limit?: number;
+    node_type?: string;
+  }): Promise<Array<{
+    id: string;
+    node_type: string;
+    title: string;
+    summary: string;
+    confidence: number;
+    source_type: string;
+    occurred_at: string;
+    tags: string[];
+  }>> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for Slack knowledge');
+    }
+    const query = new URLSearchParams();
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.node_type) query.set('node_type', params.node_type);
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/knowledge${suffix}`, { method: 'GET' });
+  }
+
+  /**
+   * Get integration status for all providers in a workspace
+   */
+  async integrationsStatus(params: {
+    workspace_id?: string;
+  }): Promise<Array<{
+    provider: string;
+    status: string;
+    last_sync_at: string | null;
+    next_sync_at: string | null;
+    error_message: string | null;
+    resources_synced: number;
+  }>> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for integrations status');
+    }
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/integrations/status`, { method: 'GET' });
+  }
 }

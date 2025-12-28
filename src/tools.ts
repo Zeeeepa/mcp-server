@@ -2888,4 +2888,101 @@ Use this to find specific issues, PRs, or discussions.`,
       return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
     }
   );
+
+  registerTool(
+    'github_knowledge',
+    {
+      title: 'GitHub extracted knowledge',
+      description: `Get knowledge extracted from GitHub issues and PRs.
+Returns: decisions, lessons, and insights automatically distilled from GitHub conversations.
+This surfaces key decisions and learnings from your repository discussions.
+
+Example queries:
+- "What decisions were made about authentication?"
+- "What lessons learned from production incidents?"
+- "Show recent architectural decisions"`,
+      inputSchema: z.object({
+        workspace_id: z.string().uuid().optional(),
+        limit: z.number().optional().describe('Maximum items to return (default: 20)'),
+        node_type: z.enum(['decision', 'lesson', 'fact', 'insight']).optional().describe('Filter by knowledge type'),
+      }),
+    },
+    async (input) => {
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult('Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.');
+      }
+
+      const result = await client.githubKnowledge({ workspace_id: workspaceId, limit: input.limit, node_type: input.node_type });
+      if (result.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No knowledge extracted from GitHub yet. Knowledge is distilled from issues/PRs after sync.' }] };
+      }
+      return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+    }
+  );
+
+  registerTool(
+    'slack_knowledge',
+    {
+      title: 'Slack extracted knowledge',
+      description: `Get knowledge extracted from Slack conversations.
+Returns: decisions, lessons, and insights automatically distilled from Slack discussions.
+This surfaces key decisions and learnings from your team conversations.
+
+Example queries:
+- "What decisions were made in #engineering this week?"
+- "Show lessons learned from outages"
+- "What architectural insights came from Slack?"`,
+      inputSchema: z.object({
+        workspace_id: z.string().uuid().optional(),
+        limit: z.number().optional().describe('Maximum items to return (default: 20)'),
+        node_type: z.enum(['decision', 'lesson', 'fact', 'insight']).optional().describe('Filter by knowledge type'),
+      }),
+    },
+    async (input) => {
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult('Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.');
+      }
+
+      const result = await client.slackKnowledge({ workspace_id: workspaceId, limit: input.limit, node_type: input.node_type });
+      if (result.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No knowledge extracted from Slack yet. Knowledge is distilled from high-engagement threads after sync.' }] };
+      }
+      return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+    }
+  );
+
+  registerTool(
+    'integrations_status',
+    {
+      title: 'Integration health status',
+      description: `Check the status of all integrations (GitHub, Slack, etc.) for a workspace.
+Returns: connection status, last sync time, next sync time, and any errors.
+Use this to verify integrations are healthy and syncing properly.`,
+      inputSchema: z.object({
+        workspace_id: z.string().uuid().optional(),
+      }),
+    },
+    async (input) => {
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult('Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.');
+      }
+
+      const result = await client.integrationsStatus({ workspace_id: workspaceId });
+      if (result.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No integrations configured for this workspace.' }] };
+      }
+
+      const formatted = result.map(i => {
+        const status = i.status === 'connected' ? '✅' : i.status === 'error' ? '❌' : '⏳';
+        const lastSync = i.last_sync_at ? new Date(i.last_sync_at).toLocaleString() : 'Never';
+        const error = i.error_message ? ` (Error: ${i.error_message})` : '';
+        return `${status} ${i.provider}: ${i.status} | Last sync: ${lastSync} | Resources: ${i.resources_synced}${error}`;
+      }).join('\n');
+
+      return { content: [{ type: 'text' as const, text: formatted }], structuredContent: toStructured(result) };
+    }
+  );
 }
