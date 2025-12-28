@@ -112,10 +112,14 @@ const CONTEXTSTREAM_TOOL_NAMES = [
   'slack_search',
   'slack_sync_users',
   'slack_knowledge',
+  'slack_summary',
   // GitHub additional
   'github_knowledge',
-  // Integrations status
+  'github_summary',
+  // Cross-source integrations
   'integrations_status',
+  'integrations_search',
+  'integrations_summary',
   // Auth/Meta
   'auth_me',
   'mcp_server_version',
@@ -322,13 +326,13 @@ To expose all tools below, set \`CONTEXTSTREAM_TOOLSET=full\` in your MCP config
 \`ai_context\`, \`ai_enhanced_context\`, \`ai_context_budget\`, \`ai_embeddings\`, \`ai_plan\`, \`ai_tasks\`
 
 **GitHub Integration** (PRO):
-\`github_stats\`, \`github_repos\`, \`github_contributors\`, \`github_activity\`, \`github_issues\`, \`github_search\`, \`github_knowledge\`
+\`github_stats\`, \`github_repos\`, \`github_contributors\`, \`github_activity\`, \`github_issues\`, \`github_search\`, \`github_knowledge\`, \`github_summary\`
 
 **Slack Integration** (PRO):
-\`slack_stats\`, \`slack_channels\`, \`slack_contributors\`, \`slack_activity\`, \`slack_discussions\`, \`slack_search\`, \`slack_sync_users\`, \`slack_knowledge\`
+\`slack_stats\`, \`slack_channels\`, \`slack_contributors\`, \`slack_activity\`, \`slack_discussions\`, \`slack_search\`, \`slack_sync_users\`, \`slack_knowledge\`, \`slack_summary\`
 
-**Integrations**:
-\`integrations_status\`
+**Cross-Source Integrations** (PRO):
+\`integrations_status\`, \`integrations_search\`, \`integrations_summary\`
 
 See full documentation: https://contextstream.io/docs/mcp/tools
 `.trim();
