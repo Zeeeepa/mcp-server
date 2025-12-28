@@ -3075,4 +3075,107 @@ export class ContextStreamClient {
     }
     return request(this.config, `/workspaces/${withDefaults.workspace_id}/integrations/status`, { method: 'GET' });
   }
+
+  /**
+   * Get GitHub summary for a workspace
+   */
+  async githubSummary(params: {
+    workspace_id?: string;
+    days?: number;
+    repo?: string;
+  }): Promise<unknown> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for GitHub summary');
+    }
+    const query = new URLSearchParams();
+    if (params?.days) query.set('days', String(params.days));
+    if (params?.repo) query.set('repo', params.repo);
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request(this.config, `/github/summary${suffix}`, { method: 'GET' });
+  }
+
+  /**
+   * Get Slack summary for a workspace
+   */
+  async slackSummary(params: {
+    workspace_id?: string;
+    days?: number;
+    channel?: string;
+  }): Promise<unknown> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for Slack summary');
+    }
+    const query = new URLSearchParams();
+    if (params?.days) query.set('days', String(params.days));
+    if (params?.channel) query.set('channel', params.channel);
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request(this.config, `/slack/summary${suffix}`, { method: 'GET' });
+  }
+
+  /**
+   * Cross-source search across all integrations
+   */
+  async integrationsSearch(params: {
+    workspace_id?: string;
+    query: string;
+    limit?: number;
+    sources?: string[];
+    days?: number;
+    sort_by?: string;
+  }): Promise<unknown> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for integrations search');
+    }
+    const urlParams = new URLSearchParams();
+    urlParams.set('q', params.query);
+    urlParams.set('workspace_id', withDefaults.workspace_id);
+    if (params?.limit) urlParams.set('limit', String(params.limit));
+    if (params?.sources) urlParams.set('sources', params.sources.join(','));
+    if (params?.days) urlParams.set('days', String(params.days));
+    if (params?.sort_by) urlParams.set('sort_by', params.sort_by);
+    return request(this.config, `/integrations/search?${urlParams.toString()}`, { method: 'GET' });
+  }
+
+  /**
+   * Cross-source summary across all integrations
+   */
+  async integrationsSummary(params: {
+    workspace_id?: string;
+    days?: number;
+  }): Promise<unknown> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for integrations summary');
+    }
+    const query = new URLSearchParams();
+    query.set('workspace_id', withDefaults.workspace_id);
+    if (params?.days) query.set('days', String(params.days));
+    return request(this.config, `/integrations/summary?${query.toString()}`, { method: 'GET' });
+  }
+
+  /**
+   * Cross-source knowledge from all integrations
+   */
+  async integrationsKnowledge(params: {
+    workspace_id?: string;
+    knowledge_type?: string;
+    query?: string;
+    sources?: string[];
+    limit?: number;
+  }): Promise<unknown> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error('workspace_id is required for integrations knowledge');
+    }
+    const urlParams = new URLSearchParams();
+    urlParams.set('workspace_id', withDefaults.workspace_id);
+    if (params?.knowledge_type) urlParams.set('knowledge_type', params.knowledge_type);
+    if (params?.query) urlParams.set('query', params.query);
+    if (params?.sources) urlParams.set('sources', params.sources.join(','));
+    if (params?.limit) urlParams.set('limit', String(params.limit));
+    return request(this.config, `/integrations/knowledge?${urlParams.toString()}`, { method: 'GET' });
+  }
 }

@@ -120,6 +120,7 @@ const CONTEXTSTREAM_TOOL_NAMES = [
   'integrations_status',
   'integrations_search',
   'integrations_summary',
+  'integrations_knowledge',
   // Auth/Meta
   'auth_me',
   'mcp_server_version',

@@ -2954,6 +2954,179 @@ Example queries:
   );
 
   registerTool(
+    'github_summary',
+    {
+      title: 'GitHub activity summary',
+      description: `Get a high-level summary of GitHub activity for a workspace.
+Returns: overview of issues, PRs, commits, releases, and highlights for the specified period.
+Use this for weekly/monthly reports or to get a quick overview of repository activity.
+
+Example prompts:
+- "Give me a weekly GitHub summary"
+- "What happened in GitHub last month?"
+- "Show me the GitHub summary for repo X"`,
+      inputSchema: z.object({
+        workspace_id: z.string().uuid().optional(),
+        days: z.number().optional().describe('Number of days to summarize (default: 7)'),
+        repo: z.string().optional().describe('Filter by repository name'),
+      }),
+    },
+    async (input) => {
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult('Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.');
+      }
+
+      const result = await client.githubSummary({
+        workspace_id: workspaceId,
+        days: input.days,
+        repo: input.repo,
+      });
+      return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+    }
+  );
+
+  registerTool(
+    'slack_summary',
+    {
+      title: 'Slack activity summary',
+      description: `Get a high-level summary of Slack activity for a workspace.
+Returns: overview of messages, threads, top channels, and highlights for the specified period.
+Use this for weekly/monthly reports or to get a quick overview of team discussions.
+
+Example prompts:
+- "Give me a weekly Slack summary"
+- "What was discussed in Slack last month?"
+- "Show me the Slack summary for #engineering"`,
+      inputSchema: z.object({
+        workspace_id: z.string().uuid().optional(),
+        days: z.number().optional().describe('Number of days to summarize (default: 7)'),
+        channel: z.string().optional().describe('Filter by channel name'),
+      }),
+    },
+    async (input) => {
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult('Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.');
+      }
+
+      const result = await client.slackSummary({
+        workspace_id: workspaceId,
+        days: input.days,
+        channel: input.channel,
+      });
+      return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+    }
+  );
+
+  registerTool(
+    'integrations_search',
+    {
+      title: 'Cross-source search',
+      description: `Search across all connected integrations (GitHub, Slack, etc.) with a single query.
+Returns: unified results from all sources, ranked by relevance or recency.
+Use this to find related discussions, issues, and content across all your tools.
+
+Example prompts:
+- "Search all integrations for database migration discussions"
+- "Find mentions of authentication across GitHub and Slack"
+- "Search for API changes in the last 30 days"`,
+      inputSchema: z.object({
+        workspace_id: z.string().uuid().optional(),
+        query: z.string().describe('Search query'),
+        limit: z.number().optional().describe('Maximum results (default: 20)'),
+        sources: z.array(z.string()).optional().describe('Filter by source: github, slack'),
+        days: z.number().optional().describe('Filter to results within N days'),
+        sort_by: z.enum(['relevance', 'recent', 'engagement']).optional().describe('Sort by: relevance, recent, or engagement'),
+      }),
+    },
+    async (input) => {
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult('Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.');
+      }
+
+      const result = await client.integrationsSearch({
+        workspace_id: workspaceId,
+        query: input.query,
+        limit: input.limit,
+        sources: input.sources,
+        days: input.days,
+        sort_by: input.sort_by,
+      });
+      return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+    }
+  );
+
+  registerTool(
+    'integrations_summary',
+    {
+      title: 'Cross-source activity summary',
+      description: `Get a unified summary of activity across all connected integrations.
+Returns: combined overview of GitHub and Slack activity, key highlights, and trends.
+Use this for weekly team summaries or to understand overall activity across all tools.
+
+Example prompts:
+- "Give me a weekly team summary across all sources"
+- "What happened across GitHub and Slack last week?"
+- "Show me a unified activity overview"`,
+      inputSchema: z.object({
+        workspace_id: z.string().uuid().optional(),
+        days: z.number().optional().describe('Number of days to summarize (default: 7)'),
+      }),
+    },
+    async (input) => {
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult('Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.');
+      }
+
+      const result = await client.integrationsSummary({
+        workspace_id: workspaceId,
+        days: input.days,
+      });
+      return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+    }
+  );
+
+  registerTool(
+    'integrations_knowledge',
+    {
+      title: 'Cross-source knowledge',
+      description: `Get knowledge extracted from all connected integrations (GitHub, Slack, etc.).
+Returns: decisions, lessons, and insights distilled from all sources.
+Use this to find key decisions and learnings from across your team's conversations.
+
+Example prompts:
+- "What decisions were made across all sources about authentication?"
+- "Show me lessons learned from all integrations"
+- "What insights have we gathered from GitHub and Slack?"`,
+      inputSchema: z.object({
+        workspace_id: z.string().uuid().optional(),
+        knowledge_type: z.enum(['decision', 'lesson', 'fact', 'insight']).optional().describe('Filter by knowledge type'),
+        query: z.string().optional().describe('Optional search query to filter knowledge'),
+        sources: z.array(z.string()).optional().describe('Filter by source: github, slack'),
+        limit: z.number().optional().describe('Maximum items to return (default: 20)'),
+      }),
+    },
+    async (input) => {
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult('Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.');
+      }
+
+      const result = await client.integrationsKnowledge({
+        workspace_id: workspaceId,
+        knowledge_type: input.knowledge_type,
+        query: input.query,
+        sources: input.sources,
+        limit: input.limit,
+      });
+      return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+    }
+  );
+
+  registerTool(
     'integrations_status',
     {
       title: 'Integration health status',
