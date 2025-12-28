@@ -11,7 +11,13 @@ export interface RuleTemplate {
 
 const DEFAULT_CLAUDE_MCP_SERVER_NAME = 'contextstream';
 
+/**
+ * Complete list of all ContextStream MCP tools.
+ * This list is used for Claude Code prefixing and should match tools.ts exactly.
+ * Grouped by category for maintainability.
+ */
 const CONTEXTSTREAM_TOOL_NAMES = [
+  // Session/Context (core)
   'session_init',
   'context_smart',
   'session_summary',
@@ -24,9 +30,90 @@ const CONTEXTSTREAM_TOOL_NAMES = [
   'session_smart_search',
   'session_compress',
   'session_delta',
+  // Editor Rules
   'generate_editor_rules',
+  // Workspaces
   'workspace_associate',
   'workspace_bootstrap',
+  'workspaces_list',
+  'workspaces_create',
+  'workspaces_update',
+  'workspaces_delete',
+  'workspaces_get',
+  'workspaces_overview',
+  'workspaces_analytics',
+  'workspaces_content',
+  // Projects
+  'projects_list',
+  'projects_create',
+  'projects_update',
+  'projects_delete',
+  'projects_get',
+  'projects_overview',
+  'projects_statistics',
+  'projects_files',
+  'projects_index',
+  'projects_index_status',
+  'projects_ingest_local',
+  // Search
+  'search_semantic',
+  'search_hybrid',
+  'search_keyword',
+  'search_pattern',
+  'search_suggestions',
+  // Memory
+  'memory_create_event',
+  'memory_bulk_ingest',
+  'memory_list_events',
+  'memory_create_node',
+  'memory_list_nodes',
+  'memory_search',
+  'memory_decisions',
+  'memory_get_event',
+  'memory_update_event',
+  'memory_delete_event',
+  'memory_distill_event',
+  'memory_get_node',
+  'memory_update_node',
+  'memory_delete_node',
+  'memory_supersede_node',
+  'memory_timeline',
+  'memory_summary',
+  // Graph
+  'graph_related',
+  'graph_path',
+  'graph_decisions',
+  'graph_dependencies',
+  'graph_call_path',
+  'graph_impact',
+  'graph_circular_dependencies',
+  'graph_unused_code',
+  'graph_contradictions',
+  // AI (PRO)
+  'ai_context',
+  'ai_enhanced_context',
+  'ai_context_budget',
+  'ai_embeddings',
+  'ai_plan',
+  'ai_tasks',
+  // GitHub Integration (PRO)
+  'github_stats',
+  'github_repos',
+  'github_contributors',
+  'github_activity',
+  'github_issues',
+  'github_search',
+  // Slack Integration (PRO)
+  'slack_stats',
+  'slack_channels',
+  'slack_contributors',
+  'slack_activity',
+  'slack_discussions',
+  'slack_search',
+  'slack_sync_users',
+  // Auth/Meta
+  'auth_me',
+  'mcp_server_version',
 ] as const;
 
 function applyMcpToolPrefix(markdown: string, toolPrefix: string): string {
@@ -190,6 +277,41 @@ session_capture(event_type="decision", title="Auth Implementation Complete", con
 # Check past decisions
 session_recall(query="what did we decide about caching?")
 \`\`\`
+
+---
+
+### Full Tool Catalog
+
+The following tools are available when \`CONTEXTSTREAM_TOOLSET=full\` (default is \`core\`, which includes only the essential session/context tools above):
+
+**Session/Context** (included in core):
+\`session_init\`, \`context_smart\`, \`session_summary\`, \`session_capture\`, \`session_capture_lesson\`, \`session_get_lessons\`, \`session_recall\`, \`session_remember\`, \`session_get_user_context\`, \`session_smart_search\`, \`session_compress\`, \`session_delta\`, \`generate_editor_rules\`, \`workspace_associate\`, \`workspace_bootstrap\`
+
+**Workspaces**:
+\`workspaces_list\`, \`workspaces_create\`, \`workspaces_update\`, \`workspaces_delete\`, \`workspaces_get\`, \`workspaces_overview\`, \`workspaces_analytics\`, \`workspaces_content\`
+
+**Projects**:
+\`projects_list\`, \`projects_create\`, \`projects_update\`, \`projects_delete\`, \`projects_get\`, \`projects_overview\`, \`projects_statistics\`, \`projects_files\`, \`projects_index\`, \`projects_index_status\`, \`projects_ingest_local\`
+
+**Search**:
+\`search_semantic\`, \`search_hybrid\`, \`search_keyword\`, \`search_pattern\`, \`search_suggestions\`
+
+**Memory**:
+\`memory_create_event\`, \`memory_bulk_ingest\`, \`memory_list_events\`, \`memory_create_node\`, \`memory_list_nodes\`, \`memory_search\`, \`memory_decisions\`, \`memory_get_event\`, \`memory_update_event\`, \`memory_delete_event\`, \`memory_distill_event\`, \`memory_get_node\`, \`memory_update_node\`, \`memory_delete_node\`, \`memory_supersede_node\`, \`memory_timeline\`, \`memory_summary\`
+
+**Graph** (code analysis):
+\`graph_related\`, \`graph_path\`, \`graph_decisions\`, \`graph_dependencies\`, \`graph_call_path\`, \`graph_impact\`, \`graph_circular_dependencies\`, \`graph_unused_code\`, \`graph_contradictions\`
+
+**AI** (PRO):
+\`ai_context\`, \`ai_enhanced_context\`, \`ai_context_budget\`, \`ai_embeddings\`, \`ai_plan\`, \`ai_tasks\`
+
+**GitHub Integration** (PRO):
+\`github_stats\`, \`github_repos\`, \`github_contributors\`, \`github_activity\`, \`github_issues\`, \`github_search\`
+
+**Slack Integration** (PRO):
+\`slack_stats\`, \`slack_channels\`, \`slack_contributors\`, \`slack_activity\`, \`slack_discussions\`, \`slack_search\`, \`slack_sync_users\`
+
+See full documentation: https://contextstream.io/docs/mcp/tools
 `.trim();
 
 const CONTEXTSTREAM_RULES_MINIMAL = `
@@ -202,6 +324,7 @@ const CONTEXTSTREAM_RULES_MINIMAL = `
 - For code/file discovery, use \`session_smart_search\` before raw repo scans (\`rg\`, \`ls\`, \`find\`); fall back only if needed.
 - After meaningful work/decisions/preferences: \`session_capture(event_type=decision|preference|task|insight, title="…", content="…")\`.
 - On frustration/corrections/tool mistakes: \`session_capture_lesson(...)\`.
+- Full tool catalog (workspaces, projects, search, memory, graph, AI, integrations): see https://contextstream.io/docs/mcp/tools
 `.trim();
 
 export const TEMPLATES: Record<string, RuleTemplate> = {

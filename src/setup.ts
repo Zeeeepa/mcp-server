@@ -12,6 +12,7 @@ import { VERSION } from './version.js';
 import { credentialsFilePath, normalizeApiUrl, readSavedCredentials, writeSavedCredentials } from './credentials.js';
 
 type RuleMode = 'minimal' | 'full';
+type Toolset = 'core' | 'full';
 type InstallScope = 'global' | 'project' | 'both';
 type McpScope = InstallScope | 'skip';
 
@@ -590,6 +591,14 @@ export async function runSetupWizard(args: string[]): Promise<void> {
     const modeChoice = normalizeInput(await rl.question('Choose [1/2] (default 1): ')) || '1';
     const mode: RuleMode = modeChoice === '2' ? 'full' : 'minimal';
 
+    // Toolset selection
+    console.log('\nMCP toolset (which tools to expose to the AI):');
+    console.log('  1) Core (recommended) — essential session/context tools (~17 tools, lower token overhead)');
+    console.log('  2) Full — all tools including workspaces, projects, search, memory, graph, AI, integrations (~86 tools)');
+    console.log('     Note: Claude Code/Desktop may warn about large tool lists when using full toolset.');
+    const toolsetChoice = normalizeInput(await rl.question('Choose [1/2] (default 1): ')) || '1';
+    const toolset: Toolset = toolsetChoice === '2' ? 'full' : 'core';
+
     const editors: EditorKey[] = ['codex', 'claude', 'cursor', 'windsurf', 'cline', 'kilo', 'roo', 'aider'];
     console.log('\nSelect editors to configure (comma-separated numbers, or "all"):');
     editors.forEach((e, i) => console.log(`  ${i + 1}) ${EDITOR_LABELS[e]}`));
@@ -633,9 +642,16 @@ export async function runSetupWizard(args: string[]): Promise<void> {
               ? 'project'
               : 'both';
 
-    const mcpServer = buildContextStreamMcpServer({ apiUrl, apiKey });
-    const mcpServerClaude = buildContextStreamMcpServer({ apiUrl, apiKey, toolset: 'core' });
-    const vsCodeServer = buildContextStreamVsCodeServer({ apiUrl, apiKey });
+    // Build MCP server configs with selected toolset
+    // For core toolset, we don't need to include it in the env (it's the default)
+    // For full toolset, we include it explicitly so the server knows to expose all tools
+    const mcpServer = toolset === 'full'
+      ? buildContextStreamMcpServer({ apiUrl, apiKey, toolset: 'full' })
+      : buildContextStreamMcpServer({ apiUrl, apiKey });
+    const mcpServerClaude = buildContextStreamMcpServer({ apiUrl, apiKey, toolset });
+    const vsCodeServer = toolset === 'full'
+      ? buildContextStreamVsCodeServer({ apiUrl, apiKey, toolset: 'full' })
+      : buildContextStreamVsCodeServer({ apiUrl, apiKey });
 
     // Global MCP config
     const needsGlobalMcpConfig = mcpScope === 'global' || mcpScope === 'both' || (mcpScope === 'project' && hasCodex);
@@ -689,7 +705,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
             }
 
 	            console.log('- Claude Code: global MCP config is best done via `claude mcp add --transport stdio ...` (see docs).');
-	            console.log('  macOS/Linux: claude mcp add --transport stdio contextstream --scope user --env CONTEXTSTREAM_API_URL=... --env CONTEXTSTREAM_API_KEY=... --env CONTEXTSTREAM_TOOLSET=core -- npx -y @contextstream/mcp-server');
+	            console.log(`  macOS/Linux: claude mcp add --transport stdio contextstream --scope user --env CONTEXTSTREAM_API_URL=... --env CONTEXTSTREAM_API_KEY=... --env CONTEXTSTREAM_TOOLSET=${toolset} -- npx -y @contextstream/mcp-server`);
 	            console.log('  Windows (native): use `cmd /c npx -y @contextstream/mcp-server` after `--` if `npx` is not found.');
 	            continue;
 	          }
@@ -925,12 +941,16 @@ export async function runSetupWizard(args: string[]): Promise<void> {
       const skipped = writeActions.filter((a) => a.status === 'skipped').length;
       const dry = writeActions.filter((a) => a.status === 'dry-run').length;
       console.log(`Summary: ${created} created, ${updated} updated, ${appended} appended, ${skipped} skipped, ${dry} dry-run.`);
+      console.log(`Toolset: ${toolset} (${toolset === 'full' ? '~86 tools' : '~17 core tools'})`);
     }
 
     console.log('\nNext steps:');
     console.log('- Restart your editor/CLI after changing MCP config or rules.');
     console.log('- Prefer ContextStream search first: use session_smart_search (or mcp__contextstream__session_smart_search) before raw repo scans (rg/ls/find).');
     console.log('- If any tools require UI-based MCP setup (e.g. Cline/Kilo/Roo global), follow https://contextstream.io/docs/mcp.');
+    if (toolset === 'full') {
+      console.log('- Note: Claude Code/Desktop may warn about large tool contexts. This is expected with the full toolset.');
+    }
   } finally {
     rl.close();
   }

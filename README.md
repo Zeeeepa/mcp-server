@@ -48,9 +48,10 @@ npx -y @contextstream/mcp-server setup
 
 Notes:
 - Uses browser/device login by default and creates an API key for you.
+- Prompts for **toolset selection**: `core` (default, ~17 essential tools) or `full` (~86 tools including workspaces, projects, search, memory, graph, AI, and integrations).
 - To avoid re-auth prompts on subsequent runs, the wizard saves that API key to `~/.contextstream/credentials.json` (and also writes it into the MCP config files it generates). Delete that file to force a fresh login.
 - Codex CLI MCP config is global-only (`~/.codex/config.toml`), so the wizard will always write Codex config globally when selected.
-- Some tools still require UI/CLI-based MCP setup (the wizard will tell you when it can’t write a config).
+- Some tools still require UI/CLI-based MCP setup (the wizard will tell you when it can't write a config).
 - Preview changes without writing files: `npx -y @contextstream/mcp-server setup --dry-run`
 
 ### Run the server
@@ -74,7 +75,9 @@ contextstream-mcp
 
 If you ran the [setup wizard](#setup-wizard-recommended), you can usually skip this section.
 
-If you prefer to configure things by hand (or your tool can’t be auto-configured), add the ContextStream MCP server to your client using one of the examples below.
+If you prefer to configure things by hand (or your tool can't be auto-configured), add the ContextStream MCP server to your client using one of the examples below.
+
+**Toolset**: By default, the server exposes `core` tools (~17 essential session/context tools). To expose all ~86 tools (workspaces, projects, search, memory, graph, AI, integrations), add `"CONTEXTSTREAM_TOOLSET": "full"` to the `env` block. See the [full tool catalog](https://contextstream.io/docs/mcp/tools).
 
 ### Cursor / Windsurf / Claude Desktop (JSON)
 
@@ -204,7 +207,7 @@ You can authenticate using either:
 | `CONTEXTSTREAM_WORKSPACE_ID` | No | Default workspace ID fallback |
 | `CONTEXTSTREAM_PROJECT_ID` | No | Default project ID fallback |
 | `CONTEXTSTREAM_USER_AGENT` | No | Custom user agent string |
-| `CONTEXTSTREAM_TOOLSET` | No | Tool bundle to expose (`core` default, or `full`) |
+| `CONTEXTSTREAM_TOOLSET` | No | Tool bundle to expose: `core` (default, ~17 tools) or `full` (~86 tools). Claude Code/Desktop may warn about large tool contexts with `full`. |
 | `CONTEXTSTREAM_TOOL_ALLOWLIST` | No | Comma-separated tool names to expose (overrides toolset) |
 | `CONTEXTSTREAM_PRO_TOOLS` | No | Comma-separated tool names treated as PRO (default: `ai_context,ai_enhanced_context,ai_context_budget,ai_embeddings,ai_plan,ai_tasks`) |
 | `CONTEXTSTREAM_UPGRADE_URL` | No | Upgrade link shown when Free users call PRO tools (default: `https://contextstream.io/pricing`) |
