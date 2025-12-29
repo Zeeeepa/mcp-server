@@ -36,6 +36,8 @@ const CORE_TOOLSET = new Set<string>([
   'generate_editor_rules',
   'workspace_associate',
   'workspace_bootstrap',
+  'projects_create',
+  'projects_list',
   'auth_me',
   'mcp_server_version',
 ]);
@@ -481,16 +483,99 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     'projects_create',
     {
       title: 'Create project',
-      description: 'Create a project within a workspace (returns ApiResponse with created project in data).',
+      description: `Create a new project within a workspace.
+Use this when you need to create a project for a specific folder/codebase.
+If workspace_id is not provided, uses the current session's workspace.
+Optionally associates a local folder and generates AI editor rules.
+
+Access: Free`,
       inputSchema: z.object({
-        name: z.string(),
-        description: z.string().optional(),
-        workspace_id: z.string().uuid().optional(),
+        name: z.string().describe('Project name'),
+        description: z.string().optional().describe('Project description'),
+        workspace_id: z.string().uuid().optional().describe('Workspace ID (uses current session workspace if not provided)'),
+        folder_path: z.string().optional().describe('Optional: Local folder path to associate with this project'),
+        generate_editor_rules: z.boolean().optional().describe('Generate AI editor rules in folder_path (requires folder_path)'),
       }),
     },
     async (input) => {
-      const result = await client.createProject(input);
-      return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+      // Resolve workspace ID from session if not provided
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult('Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly.');
+      }
+
+      // Create the project
+      const result = await client.createProject({
+        name: input.name,
+        description: input.description,
+        workspace_id: workspaceId,
+      });
+
+      const projectData = result as { id?: string; name?: string };
+      let rulesGenerated: string[] = [];
+
+      // If folder_path provided, associate it with the project
+      if (input.folder_path && projectData.id) {
+        try {
+          // Write project config to folder
+          const configDir = path.join(input.folder_path, '.contextstream');
+          const configPath = path.join(configDir, 'config.json');
+
+          if (!fs.existsSync(configDir)) {
+            fs.mkdirSync(configDir, { recursive: true });
+          }
+
+          const config = {
+            workspace_id: workspaceId,
+            project_id: projectData.id,
+            project_name: input.name,
+          };
+          fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+          // Generate editor rules if requested
+          if (input.generate_editor_rules) {
+            for (const editor of getAvailableEditors()) {
+              const rule = generateRuleContent(editor, {
+                workspaceId: workspaceId,
+                projectName: input.name,
+              });
+              if (rule) {
+                const filePath = path.join(input.folder_path, rule.filename);
+                try {
+                  let existingContent = '';
+                  try {
+                    existingContent = fs.readFileSync(filePath, 'utf-8');
+                  } catch {
+                    // File doesn't exist
+                  }
+
+                  if (!existingContent) {
+                    fs.writeFileSync(filePath, rule.content);
+                    rulesGenerated.push(rule.filename);
+                  } else if (!existingContent.includes('ContextStream')) {
+                    fs.writeFileSync(filePath, existingContent + '\n\n' + rule.content);
+                    rulesGenerated.push(rule.filename + ' (appended)');
+                  }
+                } catch {
+                  // Ignore errors for individual files
+                }
+              }
+            }
+          }
+        } catch (err: unknown) {
+          // Log but don't fail - project was created successfully
+          console.error('[ContextStream] Failed to write project config:', err);
+        }
+      }
+
+      const response = {
+        ...result,
+        folder_path: input.folder_path,
+        config_written: input.folder_path ? true : undefined,
+        editor_rules_generated: rulesGenerated.length > 0 ? rulesGenerated : undefined,
+      };
+
+      return { content: [{ type: 'text' as const, text: formatContent(response) }], structuredContent: toStructured(response) };
     }
   );
 
