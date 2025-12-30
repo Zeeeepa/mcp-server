@@ -10,7 +10,7 @@ import { SessionManager } from './session-manager.js';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { VERSION } from './version.js';
+import { VERSION, checkForUpdates } from './version.js';
 import { runSetupWizard } from './setup.js';
 
 /**
@@ -139,6 +139,11 @@ async function main() {
 
   // Show first-run star message (only once per install)
   showFirstRunMessage();
+
+  // Check for updates in the background (non-blocking)
+  checkForUpdates().catch(() => {
+    // Silently ignore update check errors
+  });
 }
 
 main().catch((err) => {

@@ -69,6 +69,16 @@ npm install -g @contextstream/mcp-server
 contextstream-mcp
 ```
 
+### Keeping updated
+
+To get the latest features and bug fixes, update periodically:
+
+```bash
+npm update -g @contextstream/mcp-server
+```
+
+The MCP server will warn you when a newer version is available. After updating, restart your AI tool to use the new version.
+
 ## Configure your MCP client
 
 ### Manual setup
