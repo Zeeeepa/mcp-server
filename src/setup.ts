@@ -75,19 +75,49 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
-async function upsertTextFile(filePath: string, content: string, marker: string): Promise<'created' | 'appended' | 'skipped'> {
+const CONTEXTSTREAM_START_MARKER = '<!-- BEGIN ContextStream -->';
+const CONTEXTSTREAM_END_MARKER = '<!-- END ContextStream -->';
+
+function wrapWithMarkers(content: string): string {
+  return `${CONTEXTSTREAM_START_MARKER}\n${content.trim()}\n${CONTEXTSTREAM_END_MARKER}`;
+}
+
+async function upsertTextFile(filePath: string, content: string, _marker: string): Promise<'created' | 'appended' | 'updated'> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const exists = await fileExists(filePath);
+  const wrappedContent = wrapWithMarkers(content);
 
   if (!exists) {
-    await fs.writeFile(filePath, content, 'utf8');
+    await fs.writeFile(filePath, wrappedContent + '\n', 'utf8');
     return 'created';
   }
 
   const existing = await fs.readFile(filePath, 'utf8').catch(() => '');
-  if (existing.includes(marker)) return 'skipped';
 
-  const joined = existing.trimEnd() + '\n\n' + content.trim() + '\n';
+  // Check for start/end markers to replace existing content
+  const startIdx = existing.indexOf(CONTEXTSTREAM_START_MARKER);
+  const endIdx = existing.indexOf(CONTEXTSTREAM_END_MARKER);
+
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    // Replace content between markers (inclusive)
+    const before = existing.substring(0, startIdx);
+    const after = existing.substring(endIdx + CONTEXTSTREAM_END_MARKER.length);
+    const updated = before.trimEnd() + '\n\n' + wrappedContent + '\n' + after.trimStart();
+    await fs.writeFile(filePath, updated.trim() + '\n', 'utf8');
+    return 'updated';
+  }
+
+  // Legacy: check for old marker without start/end (migrate to new format)
+  if (existing.includes('ContextStream')) {
+    // Find the ContextStream section and try to replace it
+    // For now, append the new wrapped content - user can manually clean up
+    const joined = existing.trimEnd() + '\n\n' + wrappedContent + '\n';
+    await fs.writeFile(filePath, joined, 'utf8');
+    return 'updated';
+  }
+
+  // No existing ContextStream content - append
+  const joined = existing.trimEnd() + '\n\n' + wrappedContent + '\n';
   await fs.writeFile(filePath, joined, 'utf8');
   return 'appended';
 }
@@ -650,14 +680,14 @@ export async function runSetupWizard(args: string[]): Promise<void> {
               : 'both';
 
     // Build MCP server configs with selected toolset
-    // For core toolset, we don't need to include it in the env (it's the default)
-    // For full toolset, we include it explicitly so the server knows to expose all tools
-    const mcpServer = toolset === 'full'
-      ? buildContextStreamMcpServer({ apiUrl, apiKey, toolset: 'full' })
+    // For standard toolset, we don't need to include it in the env (it's the default)
+    // For complete toolset, we include it explicitly so the server knows to expose all tools
+    const mcpServer = toolset === 'complete'
+      ? buildContextStreamMcpServer({ apiUrl, apiKey, toolset: 'complete' })
       : buildContextStreamMcpServer({ apiUrl, apiKey });
     const mcpServerClaude = buildContextStreamMcpServer({ apiUrl, apiKey, toolset });
-    const vsCodeServer = toolset === 'full'
-      ? buildContextStreamVsCodeServer({ apiUrl, apiKey, toolset: 'full' })
+    const vsCodeServer = toolset === 'complete'
+      ? buildContextStreamVsCodeServer({ apiUrl, apiKey, toolset: 'complete' })
       : buildContextStreamVsCodeServer({ apiUrl, apiKey });
 
     // Global MCP config
@@ -675,8 +705,8 @@ export async function runSetupWizard(args: string[]): Promise<void> {
               console.log(`- ${EDITOR_LABELS[editor]}: would update ${filePath}`);
               continue;
             }
-            const codexParams = toolset === 'full'
-              ? { apiUrl, apiKey, toolset: 'full' }
+            const codexParams = toolset === 'complete'
+              ? { apiUrl, apiKey, toolset: 'complete' }
               : { apiUrl, apiKey };
             const status = await upsertCodexTomlConfig(filePath, codexParams);
             writeActions.push({ kind: 'mcp-config', target: filePath, status });
@@ -951,15 +981,16 @@ export async function runSetupWizard(args: string[]): Promise<void> {
       const skipped = writeActions.filter((a) => a.status === 'skipped').length;
       const dry = writeActions.filter((a) => a.status === 'dry-run').length;
       console.log(`Summary: ${created} created, ${updated} updated, ${appended} appended, ${skipped} skipped, ${dry} dry-run.`);
-      console.log(`Toolset: ${toolset} (${toolset === 'full' ? '~86 tools' : '~17 core tools'})`);
+      const toolsetDesc = toolset === 'light' ? '~7 tools' : toolset === 'complete' ? '~86 tools' : '~20 tools';
+      console.log(`Toolset: ${toolset} (${toolsetDesc})`);
     }
 
     console.log('\nNext steps:');
     console.log('- Restart your editor/CLI after changing MCP config or rules.');
     console.log('- Prefer ContextStream search first: use session_smart_search (or mcp__contextstream__session_smart_search) before raw repo scans (rg/ls/find).');
     console.log('- If any tools require UI-based MCP setup (e.g. Cline/Kilo/Roo global), follow https://contextstream.io/docs/mcp.');
-    if (toolset === 'full') {
-      console.log('- Note: Claude Code/Desktop may warn about large tool contexts. This is expected with the full toolset.');
+    if (toolset === 'complete') {
+      console.log('- Note: Claude Code/Desktop may warn about large tool contexts. This is expected with the complete toolset.');
     }
   } finally {
     rl.close();
