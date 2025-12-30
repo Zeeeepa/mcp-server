@@ -1352,6 +1352,7 @@ export class ContextStreamClient {
 
   /**
    * Fallback to individual API calls if batched endpoint is unavailable.
+   * Uses Promise.allSettled for parallel execution (faster than sequential).
    */
   private async _fetchSessionContextFallback(
     context: Record<string, unknown>,
@@ -1359,58 +1360,49 @@ export class ContextStreamClient {
     projectId: string | undefined,
     params: { include_recent_memory?: boolean; include_decisions?: boolean; context_hint?: string }
   ): Promise<void> {
-    // Individual calls (slower but more compatible)
-    try {
-      context.workspace = await this.workspaceOverview(workspaceId);
-    } catch { /* optional */ }
-
-    if (projectId) {
-      try {
-        context.project = await this.projectOverview(projectId);
-      } catch { /* optional */ }
-    }
-
-    if (params.include_recent_memory !== false) {
-      try {
-        context.recent_memory = await this.listMemoryEvents({
-          workspace_id: workspaceId,
-          limit: 10,
-        });
-      } catch { /* optional */ }
-    }
-
-    if (params.include_decisions !== false) {
-      try {
-        context.recent_decisions = await this.memoryDecisions({
-          workspace_id: workspaceId,
-          limit: 5,
-        });
-      } catch { /* optional */ }
-    }
-
-    if (params.context_hint) {
-      try {
-        context.relevant_context = await this.memorySearch({
-          query: params.context_hint,
-          workspace_id: workspaceId,
-          limit: 5,
-        });
-      } catch { /* optional */ }
-    }
-
-    // Load high-priority lessons (critical/high severity)
-    try {
-      const lessons = await this.getHighPriorityLessons({
+    // Build array of parallel requests
+    const requests = [
+      // 0: workspace overview
+      this.workspaceOverview(workspaceId).catch(() => null),
+      // 1: project overview (if projectId exists)
+      projectId ? this.projectOverview(projectId).catch(() => null) : Promise.resolve(null),
+      // 2: recent memory events
+      params.include_recent_memory !== false
+        ? this.listMemoryEvents({ workspace_id: workspaceId, limit: 10 }).catch(() => null)
+        : Promise.resolve(null),
+      // 3: recent decisions
+      params.include_decisions !== false
+        ? this.memoryDecisions({ workspace_id: workspaceId, limit: 5 }).catch(() => null)
+        : Promise.resolve(null),
+      // 4: relevant context from semantic search
+      params.context_hint
+        ? this.memorySearch({ query: params.context_hint, workspace_id: workspaceId, limit: 5 }).catch(() => null)
+        : Promise.resolve(null),
+      // 5: high-priority lessons
+      this.getHighPriorityLessons({
         workspace_id: workspaceId,
         project_id: projectId,
         context_hint: params.context_hint,
         limit: 5,
-      });
-      if (lessons.length > 0) {
-        context.lessons = lessons;
-        context.lessons_warning = `⚠️ ${lessons.length} lesson(s) from past mistakes. Review before making changes.`;
-      }
-    } catch { /* optional */ }
+      }).catch(() => null),
+    ];
+
+    // Execute all requests in parallel
+    const results = await Promise.all(requests);
+
+    // Assign results to context (null values are ignored)
+    if (results[0]) context.workspace = results[0];
+    if (results[1]) context.project = results[1];
+    if (results[2]) context.recent_memory = results[2];
+    if (results[3]) context.recent_decisions = results[3];
+    if (results[4]) context.relevant_context = results[4];
+
+    // Handle lessons with warning message
+    const lessons = results[5] as Array<unknown> | null;
+    if (lessons && Array.isArray(lessons) && lessons.length > 0) {
+      context.lessons = lessons;
+      context.lessons_warning = `⚠️ ${lessons.length} lesson(s) from past mistakes. Review before making changes.`;
+    }
   }
 
   /**
