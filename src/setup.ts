@@ -12,7 +12,7 @@ import { VERSION } from './version.js';
 import { credentialsFilePath, normalizeApiUrl, readSavedCredentials, writeSavedCredentials } from './credentials.js';
 
 type RuleMode = 'minimal' | 'full';
-type Toolset = 'core' | 'full';
+type Toolset = 'light' | 'standard' | 'complete';
 type InstallScope = 'global' | 'project' | 'both';
 type McpScope = InstallScope | 'skip';
 
@@ -595,16 +595,16 @@ export async function runSetupWizard(args: string[]): Promise<void> {
 
     // Toolset selection
     console.log('\nMCP toolset (which tools to expose to the AI):');
-    console.log('  1) Core (recommended) — essential session/context tools (~17 tools, lower token overhead)');
-    console.log('     Best for: most users, Claude Code, Claude Desktop (avoids large-context warnings)');
-    console.log('  2) Full — all tools including workspaces, projects, search, memory, graph, AI, integrations (~86 tools)');
-    console.log('     Best for: power users needing direct access to all workspace/project/graph/AI tools');
-    console.log('     Note: Claude Code/Desktop may warn about large tool lists when using full toolset.');
+    console.log('  1) Light — minimal essential tools for fastest responses (~7 tools)');
+    console.log('     Best for: simple tasks, resource-constrained environments');
+    console.log('  2) Standard (recommended) — balanced set of session and context tools (~20 tools)');
+    console.log('     Best for: most users, balances speed with capabilities');
+    console.log('  3) Complete — all tools including memory, knowledge graph, AI, integrations (~86 tools)');
+    console.log('     Best for: power users needing full workspace/project/graph capabilities');
     console.log('');
-    console.log('  Tip: You can switch toolsets later by editing the MCP config and setting CONTEXTSTREAM_TOOLSET=full');
-    console.log('       See https://contextstream.io/docs/mcp/tools for the full tool catalog.');
-    const toolsetChoice = normalizeInput(await rl.question('Choose [1/2] (default 1): ')) || '1';
-    const toolset: Toolset = toolsetChoice === '2' ? 'full' : 'core';
+    console.log('  Tip: Change later by setting CONTEXTSTREAM_TOOLSET=light|standard|complete');
+    const toolsetChoice = normalizeInput(await rl.question('Choose [1/2/3] (default 2): ')) || '2';
+    const toolset: Toolset = toolsetChoice === '1' ? 'light' : toolsetChoice === '3' ? 'complete' : 'standard';
 
     const editors: EditorKey[] = ['codex', 'claude', 'cursor', 'windsurf', 'cline', 'kilo', 'roo', 'aider'];
     console.log('\nSelect editors to configure (comma-separated numbers, or "all"):');

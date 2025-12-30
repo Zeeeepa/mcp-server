@@ -19,7 +19,20 @@ type ToolTextResult = {
 const LESSON_DEDUP_WINDOW_MS = 2 * 60 * 1000;
 const recentLessonCaptures = new Map<string, number>();
 
-const CORE_TOOLSET = new Set<string>([
+// Light toolset: Essential tools for fast, minimal interactions
+const LIGHT_TOOLSET = new Set<string>([
+  'session_init',
+  'context_smart',
+  'session_capture',
+  'session_recall',
+  'session_remember',
+  'auth_me',
+  'mcp_server_version',
+]);
+
+// Standard toolset: Balanced set for most users (default)
+const STANDARD_TOOLSET = new Set<string>([
+  // Core session tools
   'session_init',
   'session_tools',
   'context_smart',
@@ -33,19 +46,32 @@ const CORE_TOOLSET = new Set<string>([
   'session_smart_search',
   'session_compress',
   'session_delta',
+  // Setup and configuration
   'generate_editor_rules',
   'workspace_associate',
   'workspace_bootstrap',
   'projects_create',
   'projects_list',
+  // Utility
   'auth_me',
   'mcp_server_version',
 ]);
 
-const TOOLSET_ALIASES: Record<string, Set<string>> = {
-  core: CORE_TOOLSET,
-  minimal: CORE_TOOLSET,
-  essential: CORE_TOOLSET,
+// Complete toolset: All tools (resolved as null allowlist)
+// Includes: workspaces, projects, memory, knowledge graph, AI, integrations
+
+const TOOLSET_ALIASES: Record<string, Set<string> | null> = {
+  // Light mode - minimal, fastest
+  light: LIGHT_TOOLSET,
+  minimal: LIGHT_TOOLSET,
+  // Standard mode - balanced (default)
+  standard: STANDARD_TOOLSET,
+  core: STANDARD_TOOLSET,
+  essential: STANDARD_TOOLSET,
+  // Complete mode - all tools
+  complete: null,
+  full: null,
+  all: null,
 };
 
 function parseToolList(raw: string): Set<string> {
@@ -57,35 +83,35 @@ function parseToolList(raw: string): Set<string> {
   );
 }
 
-function resolveToolFilter(): { allowlist: Set<string> | null; source: string | null } {
-  const defaultToolset = CORE_TOOLSET;
+function resolveToolFilter(): { allowlist: Set<string> | null; source: string } {
   const allowlistRaw = process.env.CONTEXTSTREAM_TOOL_ALLOWLIST;
   if (allowlistRaw) {
     const allowlist = parseToolList(allowlistRaw);
     if (allowlist.size === 0) {
-      console.error('[ContextStream] CONTEXTSTREAM_TOOL_ALLOWLIST is empty; using core tool list.');
-      return { allowlist: defaultToolset, source: 'core' };
+      console.error('[ContextStream] CONTEXTSTREAM_TOOL_ALLOWLIST is empty; using standard toolset.');
+      return { allowlist: STANDARD_TOOLSET, source: 'standard' };
     }
     return { allowlist, source: 'allowlist' };
   }
 
   const toolsetRaw = process.env.CONTEXTSTREAM_TOOLSET;
   if (!toolsetRaw) {
-    return { allowlist: defaultToolset, source: 'core' };
+    // Default to standard toolset
+    return { allowlist: STANDARD_TOOLSET, source: 'standard' };
   }
 
   const key = toolsetRaw.trim().toLowerCase();
-  if (!key || key === 'full' || key === 'all') {
-    return { allowlist: null, source: 'full' };
-  }
-
-  const resolved = TOOLSET_ALIASES[key];
-  if (resolved) {
+  if (key in TOOLSET_ALIASES) {
+    const resolved = TOOLSET_ALIASES[key];
+    // null means complete/full toolset
+    if (resolved === null) {
+      return { allowlist: null, source: 'complete' };
+    }
     return { allowlist: resolved, source: key };
   }
 
-  console.error(`[ContextStream] Unknown CONTEXTSTREAM_TOOLSET "${toolsetRaw}". Using core tool list.`);
-  return { allowlist: defaultToolset, source: 'core' };
+  console.error(`[ContextStream] Unknown CONTEXTSTREAM_TOOLSET "${toolsetRaw}". Using standard toolset.`);
+  return { allowlist: STANDARD_TOOLSET, source: 'standard' };
 }
 
 function formatContent(data: unknown) {
@@ -142,11 +168,15 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
   const toolFilter = resolveToolFilter();
   const toolAllowlist = toolFilter.allowlist;
   if (toolAllowlist) {
-    const source = toolFilter.source ?? 'custom';
-    const hint = source === 'core'
-      ? ' Set CONTEXTSTREAM_TOOLSET=full to expose all tools.'
-      : '';
-    console.error(`[ContextStream] Toolset limited (${source}): ${toolAllowlist.size} tools.${hint}`);
+    const source = toolFilter.source;
+    const hint = source === 'light'
+      ? ' Set CONTEXTSTREAM_TOOLSET=standard or complete for more tools.'
+      : source === 'standard'
+        ? ' Set CONTEXTSTREAM_TOOLSET=complete for all tools.'
+        : '';
+    console.error(`[ContextStream] Toolset: ${source} (${toolAllowlist.size} tools).${hint}`);
+  } else {
+    console.error(`[ContextStream] Toolset: complete (all tools).`);
   }
   const defaultProTools = new Set<string>([
     // AI endpoints (typically paid/credit-metered)
