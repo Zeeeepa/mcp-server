@@ -569,7 +569,7 @@ Access: Free`,
       }
 
       const response = {
-        ...result,
+        ...(result && typeof result === 'object' ? result : {}),
         folder_path: input.folder_path,
         config_written: input.folder_path ? true : undefined,
         editor_rules_generated: rulesGenerated.length > 0 ? rulesGenerated : undefined,

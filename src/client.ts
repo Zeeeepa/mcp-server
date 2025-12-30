@@ -86,10 +86,19 @@ export class ContextStreamClient {
     input: T
   ): T {
     const { defaultWorkspaceId, defaultProjectId } = this.config;
+    const workspaceId = input.workspace_id || defaultWorkspaceId;
+
+    // Only use defaultProjectId if:
+    // 1. project_id is not explicitly provided, AND
+    // 2. workspace_id matches defaultWorkspaceId (or both are undefined)
+    // This prevents using a cached project_id that belongs to a different workspace
+    const useDefaultProject = !input.project_id &&
+      (!input.workspace_id || input.workspace_id === defaultWorkspaceId);
+
     return {
       ...input,
-      workspace_id: input.workspace_id || defaultWorkspaceId,
-      project_id: input.project_id || defaultProjectId,
+      workspace_id: workspaceId,
+      project_id: input.project_id || (useDefaultProject ? defaultProjectId : undefined),
     } as T;
   }
 
@@ -1271,12 +1280,18 @@ export class ContextStreamClient {
             context.workspace_source = 'api_fallback';
             context.workspace_mismatch_warning = `Config had workspace ${oldWorkspaceId} but you don't have access. Using ${workspaceId} instead.`;
 
+            // Clear project_id since it likely belongs to the old workspace
+            // The API returned project (if any) will be used instead
+            projectId = batchedContext.project?.id;
+            context.project_id = projectId;
+            this.config.defaultProjectId = projectId;
+
             // Update local config to prevent this from happening again
             if (rootPath) {
               writeLocalConfig(rootPath, {
                 workspace_id: workspaceId,
                 workspace_name: workspaceName,
-                project_id: projectId,
+                project_id: projectId, // Use API-returned project or undefined
                 associated_at: new Date().toISOString(),
               });
               console.error(`[ContextStream] Updated local config with accessible workspace: ${workspaceId}`);
