@@ -54,7 +54,7 @@ npx -y @contextstream/mcp-server setup
 
 Notes:
 - Uses browser/device login by default and creates an API key for you.
-- Prompts for **toolset selection**: `core` (default, ~17 essential tools) or `full` (~86 tools including workspaces, projects, search, memory, graph, AI, and integrations).
+- Prompts for **toolset selection**: `light` (~30 tools), `standard` (default, ~50 tools), or `complete` (~86 tools including workspaces, projects, search, memory, graph, AI, and integrations).
 - To avoid re-auth prompts on subsequent runs, the wizard saves that API key to `~/.contextstream/credentials.json` (and also writes it into the MCP config files it generates). Delete that file to force a fresh login.
 - Codex CLI MCP config is global-only (`~/.codex/config.toml`), so the wizard will always write Codex config globally when selected.
 - Some tools still require UI/CLI-based MCP setup (the wizard will tell you when it can't write a config).
@@ -93,7 +93,7 @@ If you ran the [setup wizard](#setup-wizard-recommended), you can usually skip t
 
 If you prefer to configure things by hand (or your tool can't be auto-configured), add the ContextStream MCP server to your client using one of the examples below.
 
-**Toolset**: By default, the server exposes `core` tools (~17 essential session/context tools). To expose all ~86 tools (workspaces, projects, search, memory, graph, AI, integrations), add `"CONTEXTSTREAM_TOOLSET": "full"` to the `env` block. See the [full tool catalog](https://contextstream.io/docs/mcp/tools).
+**Toolset**: By default, the server exposes the `standard` toolset (~50 tools). Use `CONTEXTSTREAM_TOOLSET=light` to reduce tool count (~30 tools), or `CONTEXTSTREAM_TOOLSET=complete` to expose all ~86 tools (workspaces, projects, search, memory, graph, AI, integrations). See the [full tool catalog](https://contextstream.io/docs/mcp/tools).
 
 ### Cursor / Windsurf / Claude Desktop (JSON)
 
@@ -107,7 +107,7 @@ These clients use the `mcpServers` JSON schema:
 
 Many other MCP JSON clients also use this same `mcpServers` shape (including Claude Code project scope via `.mcp.json`).
 
-**Core toolset (default, ~17 tools):**
+**Standard toolset (default, ~50 tools):**
 
 ```json
 {
@@ -124,7 +124,7 @@ Many other MCP JSON clients also use this same `mcpServers` shape (including Cla
 }
 ```
 
-**Full toolset (~86 tools):**
+**Complete toolset (~86 tools):**
 
 ```json
 {
@@ -135,7 +135,7 @@ Many other MCP JSON clients also use this same `mcpServers` shape (including Cla
       "env": {
         "CONTEXTSTREAM_API_URL": "https://api.contextstream.io",
         "CONTEXTSTREAM_API_KEY": "your_api_key",
-        "CONTEXTSTREAM_TOOLSET": "full"
+        "CONTEXTSTREAM_TOOLSET": "complete"
       }
     }
   }
@@ -164,7 +164,7 @@ VS Code uses a different schema with a top-level `servers` map:
 }
 ```
 
-**Full toolset (~86 tools):**
+**Complete toolset (~86 tools):**
 
 ```json
 {
@@ -176,7 +176,7 @@ VS Code uses a different schema with a top-level `servers` map:
       "env": {
         "CONTEXTSTREAM_API_URL": "https://api.contextstream.io",
         "CONTEXTSTREAM_API_KEY": "your_api_key",
-        "CONTEXTSTREAM_TOOLSET": "full"
+        "CONTEXTSTREAM_TOOLSET": "complete"
       }
     }
   }
@@ -213,7 +213,7 @@ Strong recommendation: VS Code supports `inputs` so you don’t have to hardcode
 
 User scope (all projects):
 
-**Core toolset (recommended for Claude Code):**
+**Standard toolset (default):**
 
 ```bash
 claude mcp add --transport stdio contextstream --scope user \
@@ -222,37 +222,37 @@ claude mcp add --transport stdio contextstream --scope user \
   -- npx -y @contextstream/mcp-server
 ```
 
-**Full toolset (~86 tools):**
+**Complete toolset (~86 tools):**
 
 ```bash
 claude mcp add --transport stdio contextstream --scope user \
   --env CONTEXTSTREAM_API_URL=https://api.contextstream.io \
   --env CONTEXTSTREAM_API_KEY=YOUR_KEY \
-  --env CONTEXTSTREAM_TOOLSET=full \
+  --env CONTEXTSTREAM_TOOLSET=complete \
   -- npx -y @contextstream/mcp-server
 ```
 
-Note: Claude Code may warn about large tool contexts when using `full`. The default is `core` (~17 tools).
+Note: Claude Code may warn about large tool contexts when using `complete`. The default is `standard` (~50 tools). Use `light` for fewer tools.
 
 Windows caveat (native Windows, not WSL): if `npx` isn't found, use `cmd /c npx -y @contextstream/mcp-server` after `--`.
 
 **Alternative (JSON form):**
 
-Core:
+Standard:
 ```bash
 claude mcp add-json contextstream \
 '{"type":"stdio","command":"npx","args":["-y","@contextstream/mcp-server"],"env":{"CONTEXTSTREAM_API_URL":"https://api.contextstream.io","CONTEXTSTREAM_API_KEY":"your_api_key"}}'
 ```
 
-Full:
+Complete:
 ```bash
 claude mcp add-json contextstream \
-'{"type":"stdio","command":"npx","args":["-y","@contextstream/mcp-server"],"env":{"CONTEXTSTREAM_API_URL":"https://api.contextstream.io","CONTEXTSTREAM_API_KEY":"your_api_key","CONTEXTSTREAM_TOOLSET":"full"}}'
+'{"type":"stdio","command":"npx","args":["-y","@contextstream/mcp-server"],"env":{"CONTEXTSTREAM_API_URL":"https://api.contextstream.io","CONTEXTSTREAM_API_KEY":"your_api_key","CONTEXTSTREAM_TOOLSET":"complete"}}'
 ```
 
 ### Codex CLI (`~/.codex/config.toml`)
 
-**Core toolset (default):**
+**Standard toolset (default):**
 
 ```toml
 [mcp_servers.contextstream]
@@ -264,7 +264,7 @@ CONTEXTSTREAM_API_URL = "https://api.contextstream.io"
 CONTEXTSTREAM_API_KEY = "your_api_key"
 ```
 
-**Full toolset (~86 tools):**
+**Complete toolset (~86 tools):**
 
 ```toml
 [mcp_servers.contextstream]
@@ -274,7 +274,7 @@ args = ["-y", "@contextstream/mcp-server"]
 [mcp_servers.contextstream.env]
 CONTEXTSTREAM_API_URL = "https://api.contextstream.io"
 CONTEXTSTREAM_API_KEY = "your_api_key"
-CONTEXTSTREAM_TOOLSET = "full"
+CONTEXTSTREAM_TOOLSET = "complete"
 ```
 
 After editing, restart your MCP client so it reloads the server configuration.
@@ -296,7 +296,7 @@ You can authenticate using either:
 | `CONTEXTSTREAM_WORKSPACE_ID` | No | Default workspace ID fallback |
 | `CONTEXTSTREAM_PROJECT_ID` | No | Default project ID fallback |
 | `CONTEXTSTREAM_USER_AGENT` | No | Custom user agent string |
-| `CONTEXTSTREAM_TOOLSET` | No | Tool bundle to expose: `core` (default, ~17 tools) or `full` (~86 tools). Claude Code/Desktop may warn about large tool contexts with `full`. |
+| `CONTEXTSTREAM_TOOLSET` | No | Tool bundle to expose: `light` (~30 tools), `standard` (default, ~50 tools), or `complete` (~86 tools). Claude Code/Desktop may warn about large tool contexts with `complete`. |
 | `CONTEXTSTREAM_TOOL_ALLOWLIST` | No | Comma-separated tool names to expose (overrides toolset) |
 | `CONTEXTSTREAM_PRO_TOOLS` | No | Comma-separated tool names treated as PRO (default: `ai_context,ai_enhanced_context,ai_context_budget,ai_embeddings,ai_plan,ai_tasks`) |
 | `CONTEXTSTREAM_UPGRADE_URL` | No | Upgrade link shown when Free users call PRO tools (default: `https://contextstream.io/pricing`) |

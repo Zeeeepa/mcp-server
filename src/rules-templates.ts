@@ -17,7 +17,7 @@ const DEFAULT_CLAUDE_MCP_SERVER_NAME = 'contextstream';
  * Grouped by category for maintainability.
  */
 const CONTEXTSTREAM_TOOL_NAMES = [
-  // Session/Context (core)
+  // Session/Context (standard)
   'session_init',
   'context_smart',
   'session_summary',
@@ -135,7 +135,7 @@ function applyMcpToolPrefix(markdown: string, toolPrefix: string): string {
 }
 
 const CONTEXTSTREAM_RULES_FULL = `
-## ContextStream Integration
+## ContextStream Integration (Enhanced)
 
 You have access to ContextStream MCP tools for persistent memory and context.
 
@@ -144,7 +144,8 @@ You have access to ContextStream MCP tools for persistent memory and context.
 | Message | What to Call |
 |---------|--------------|
 | **1st message** | \`session_init(folder_path="...", context_hint="<user's message>")\` |
-| **2nd+ messages** | \`context_smart(user_message="<user's message>", max_tokens=400)\` |
+| **2nd+ messages** | \`context_smart(user_message="<user's message>", format="minified", max_tokens=400)\` |
+| **Before risky/non-trivial work** | \`session_get_lessons(query="<topic>")\` |
 | **After completing task** | \`session_capture(...)\` - MUST capture decisions/insights |
 | **User frustration/correction** | \`session_capture_lesson(...)\` - MUST capture lessons |
 | **Command/tool error + fix** | \`session_capture_lesson(...)\` - MUST capture lessons |
@@ -153,7 +154,7 @@ You have access to ContextStream MCP tools for persistent memory and context.
 
 ---
 
-### ⚠️ Why context_smart is Required (Even After session_init)
+### Why context_smart is Required (Even After session_init)
 
 **Common mistake:** "session_init already gave me context, I don't need context_smart"
 
@@ -164,8 +165,8 @@ You have access to ContextStream MCP tools for persistent memory and context.
 **Example failure:**
 - User asks: "how should I implement authentication?"
 - Auth decisions were made 20 conversations ago
-- ❌ \`session_init\` won't have it (too old, not in recent 10)
-- ✅ \`context_smart\` FINDS it via semantic search
+- \`session_init\` won't have it (too old, not in recent 10)
+- \`context_smart\` FINDS it via semantic search
 
 **Without context_smart, you WILL miss relevant older context.**
 
@@ -175,10 +176,35 @@ You have access to ContextStream MCP tools for persistent memory and context.
 
 - For trivial/local edits: \`context_smart(..., max_tokens=200)\`
 - Default: \`context_smart(..., max_tokens=400)\`
-- Deep debugging/architecture or heavy “what did we decide?”: \`context_smart(..., max_tokens=800)\`
-- Keep \`format="minified"\` (default) unless you’re actively debugging tool output
+- Deep debugging/architecture or heavy "what did we decide?": \`context_smart(..., max_tokens=800)\`
+- Keep \`format="minified"\` (default) unless you're debugging tool output
 
 If context still feels missing, increase \`max_tokens\` and/or call \`session_recall\` for a focused deep lookup.
+
+---
+
+### Preferences & Lessons (Use Early)
+
+- If preferences or style matter, call \`session_get_user_context\`.
+- Before risky changes or when past mistakes may apply, call \`session_get_lessons(query="<topic>")\`.
+- When frustration, corrections, or tool mistakes occur, immediately call \`session_capture_lesson\`.
+
+---
+
+### Search, Graphs, and Code Intelligence (ContextStream-first)
+
+- Use \`session_smart_search\` before scanning the repo or grepping.
+- Use \`search_semantic\`/\`search_hybrid\`/\`search_keyword\` for targeted queries.
+- For dependencies/impact/call paths, use \`graph_dependencies\`, \`graph_impact\`, and \`graph_call_path\`.
+- If the graph is missing or stale, run \`graph_ingest\` (async by default with \`wait: false\`). Tell the user it can take a few minutes; optionally call \`projects_statistics\` to estimate time.
+
+---
+
+### Distillation & Memory Hygiene
+
+- Use \`session_summary\` for a fast workspace snapshot.
+- Use \`session_compress\` when the chat is long or context limits are near.
+- Use \`memory_summary\` for recent work summaries and \`memory_distill_event\` to condense noisy memory entries.
 
 ---
 
@@ -186,8 +212,8 @@ If context still feels missing, increase \`max_tokens\` and/or call \`session_re
 
 | When | Tool | Example |
 |------|------|---------|
-| User makes a decision | \`session_capture\` | "Let's use PostgreSQL" → capture as decision |
-| User states preference | \`session_capture\` | "I prefer TypeScript" → capture as preference |
+| User makes a decision | \`session_capture\` | "Let's use PostgreSQL" -> capture as decision |
+| User states preference | \`session_capture\` | "I prefer TypeScript" -> capture as preference |
 | You complete a task | \`session_capture\` | Capture what was done, decisions made |
 | Need past context | \`session_recall\` | "What did we decide about X?" |
 
@@ -195,118 +221,22 @@ If context still feels missing, increase \`max_tokens\` and/or call \`session_re
 
 ---
 
-### Behavior Rules
-
-**First message of conversation:**
-1. Call \`session_init(folder_path="<cwd>", context_hint="<user's message>")\`
-2. Then respond
-
-**Every subsequent message:**
-1. Call \`context_smart(user_message="<user's message>")\` FIRST
-2. Then respond
-
-**After completing a task:**
-1. Call \`session_capture\` to save decisions, preferences, or insights
-2. This is NOT optional
-
-**When user asks about past decisions:**
-- Use \`session_recall\` - do NOT ask user to repeat themselves
-
----
-
-### Search (ContextStream-first)
-
-- Before scanning the repo or grepping, use \`session_smart_search\` to locate relevant files, patterns, and prior context.
-- Follow up with \`session_recall\` if you need deeper history on a specific topic.
-- Only fall back to raw file scans (\`rg\`, \`ls\`, \`find\`) when ContextStream search doesn't surface what you need.
-
----
-
-### Lesson Capture (MANDATORY)
-
-When:
-1. **Expresses frustration** (caps, profanity, "COME ON", "WTF", repeated corrections)
-2. **Corrects you** ("No, you should...", "That's wrong", "Fix this")
-3. **Points out a mistake** (broken code, wrong approach, production issue)
-4. **A command/tool call fails and you learn the correct fix** (even if the user didn’t explicitly correct you)
-
-You MUST immediately call \`session_capture_lesson\` with:
-
-| Field | Description | Example |
-|-------|-------------|---------|
-| \`title\` | What to remember | "Verify assets in git before pushing" |
-| \`severity\` | \`critical\`/\`high\`/\`medium\`/\`low\` | \`critical\` for production issues |
-| \`category\` | \`workflow\`/\`code_quality\`/\`verification\`/\`communication\`/\`project_specific\` | \`workflow\` |
-| \`trigger\` | What action caused the problem | "Pushed code referencing images without committing them" |
-| \`impact\` | What went wrong | "Production 404 errors - broken landing page" |
-| \`prevention\` | How to prevent in future | "Run git status to check untracked files before pushing" |
-| \`keywords\` | Keywords for matching | \`["git", "images", "assets", "push"]\` |
-
-**Example call:**
-\`\`\`json
-{
-  "title": "Always verify assets in git before pushing code references",
-  "severity": "critical",
-  "category": "workflow",
-  "trigger": "Pushed code referencing /screenshots/*.png without committing images",
-  "impact": "Production 404 errors - broken landing page",
-  "prevention": "Run 'git status' to check untracked files before pushing code that references static assets",
-  "keywords": ["git", "images", "assets", "push", "404", "static"]
-}
-\`\`\`
-
-**Why this matters:**
-- Lessons are surfaced automatically in \`session_init\` and \`context_smart\`
-- Future sessions will warn you before repeating the same mistake
-- This prevents production issues and user frustration
-
-**Severity guide:**
-- \`critical\`: Production outages, data loss, security issues
-- \`high\`: Breaking changes, significant user impact
-- \`medium\`: Workflow inefficiencies, minor bugs
-- \`low\`: Style/preference corrections
-
----
-
-### Quick Examples
-
-\`\`\`
-# First message - user asks about auth
-session_init(folder_path="/path/to/project", context_hint="how should I implement auth?")
-# Returns workspace info + semantically relevant auth decisions from ANY time
-
-# Second message - user asks about database
-context_smart(user_message="what database should I use?", max_tokens=400)
-# Returns: W:Maker|P:myproject|D:Use PostgreSQL|D:No ORMs|M:DB schema at...
-
-# User says "Let's use Redis for caching"
-session_capture(event_type="decision", title="Caching Choice", content="Using Redis for caching layer")
-
-# After completing implementation
-session_capture(event_type="decision", title="Auth Implementation Complete", content="Implemented JWT auth with refresh tokens...")
-
-# Check past decisions
-session_recall(query="what did we decide about caching?")
-\`\`\`
-
----
-
 ### Full Tool Catalog
 
-To expose all tools below, set \`CONTEXTSTREAM_TOOLSET=full\` in your MCP config. The default (\`core\`) includes only the essential session/context tools above.
+To expose all tools below, set \`CONTEXTSTREAM_TOOLSET=complete\` in your MCP config. The default (\`standard\`) includes the essential session, search, memory, and graph tools above.
 
-**To enable full toolset in your MCP config:**
+**To enable the complete toolset in your MCP config:**
 \`\`\`json
 {
   "env": {
-    "CONTEXTSTREAM_TOOLSET": "full"
+    "CONTEXTSTREAM_TOOLSET": "complete"
   }
 }
 \`\`\`
 
-**Available tool categories (when \`CONTEXTSTREAM_TOOLSET=full\`):**
+**Available tool categories (when \`CONTEXTSTREAM_TOOLSET=complete\`):**
 
-**Session/Context** (included in core):
+**Session/Context** (included in standard):
 \`session_init\`, \`context_smart\`, \`session_summary\`, \`session_capture\`, \`session_capture_lesson\`, \`session_get_lessons\`, \`session_recall\`, \`session_remember\`, \`session_get_user_context\`, \`session_smart_search\`, \`session_compress\`, \`session_delta\`, \`generate_editor_rules\`, \`workspace_associate\`, \`workspace_bootstrap\`
 
 **Workspaces**:
@@ -340,24 +270,26 @@ See full documentation: https://contextstream.io/docs/mcp/tools
 `.trim();
 
 const CONTEXTSTREAM_RULES_MINIMAL = `
-## ContextStream (Minimal)
+## ContextStream (Standard)
 
 - First user message: \`session_init(folder_path="<cwd>", context_hint="<user_message>")\`, then answer.
 - Every user message: \`context_smart(user_message="<user_message>", format="minified", max_tokens=400)\` BEFORE answering.
   - Use \`max_tokens=200\` for trivial/local edits, \`max_tokens=800\` for deep debugging/architecture.
-- If prior context is missing or user asks past decisions: \`session_recall(query="<question>")\`, then answer.
-- For code/file discovery, use \`session_smart_search\` before raw repo scans (\`rg\`, \`ls\`, \`find\`); fall back only if needed.
-- After meaningful work/decisions/preferences: \`session_capture(event_type=decision|preference|task|insight, title="…", content="…")\`.
+- Before risky/non-trivial work: check \`session_get_lessons(query="<topic>")\`; use \`session_get_user_context\` when preferences/style matter.
+- For discovery: use \`session_smart_search\` first; use \`search_semantic\`/\`search_hybrid\`/\`search_keyword\` for targeted lookups.
+- For code intelligence: use \`graph_dependencies\`/\`graph_impact\`/\`graph_call_path\`; run \`graph_ingest\` if the graph is missing (async by default, can take a few minutes).
+- For distillation: use \`session_summary\` for quick context; use \`session_compress\` for long chats; use \`memory_summary\` or \`memory_distill_event\` to condense memory.
+- After meaningful work/decisions/preferences: \`session_capture(event_type=decision|preference|task|insight, title="...", content="...")\`.
 - On frustration/corrections/tool mistakes: \`session_capture_lesson(...)\`.
 
 ### Tool Catalog
 
-By default, the MCP server exposes **core** tools (~17 essential session/context tools). To expose the **full** catalog (~86 tools including workspaces, projects, search, memory, graph, AI, and integrations), set \`CONTEXTSTREAM_TOOLSET=full\` in your MCP config:
+By default, the MCP server exposes the **standard** toolset (~50 tools). To expose fewer tools, set \`CONTEXTSTREAM_TOOLSET=light\`. To expose everything (~86 tools), set \`CONTEXTSTREAM_TOOLSET=complete\` in your MCP config:
 
 \`\`\`json
 {
   "env": {
-    "CONTEXTSTREAM_TOOLSET": "full"
+    "CONTEXTSTREAM_TOOLSET": "complete"
   }
 }
 \`\`\`

@@ -621,7 +621,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
     // Rules mode + editors
     console.log('Rules detail level (in the generated rules file):\n');
     console.log('  1) Standard (recommended) — concise, high-signal (lower token overhead)');
-    console.log('  2) Extended — more guidance + examples (higher token overhead)');
+    console.log('  2) Enhanced — more guidance + examples (higher token overhead)');
     const modeChoice = normalizeInput(await rl.question('Choose [1/2] (default 1): ')) || '1';
     const mode: RuleMode = modeChoice === '2' ? 'full' : 'minimal';
 
