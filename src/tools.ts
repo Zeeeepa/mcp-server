@@ -2,12 +2,14 @@ import { z } from 'zod';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { MessageExtraInfo } from '@modelcontextprotocol/sdk/types.js';
 import type { ContextStreamClient } from './client.js';
 import { readFilesFromDirectory, readAllFilesInBatches, countIndexableFiles } from './files.js';
 import { SessionManager } from './session-manager.js';
 import { getAvailableEditors, generateRuleContent, generateAllRuleFiles } from './rules-templates.js';
 import { VERSION } from './version.js';
 import { generateToolCatalog, getCoreToolsHint, type CatalogFormat } from './tool-catalog.js';
+import { getAuthOverride, runWithAuthOverride, type AuthOverride } from './auth-context.js';
 
 type StructuredContent = { [x: string]: unknown } | undefined;
 type ToolTextResult = {
@@ -18,6 +20,43 @@ type ToolTextResult = {
 
 const LESSON_DEDUP_WINDOW_MS = 2 * 60 * 1000;
 const recentLessonCaptures = new Map<string, number>();
+
+function normalizeHeaderValue(value: string | string[] | undefined): string | undefined {
+  if (!value) return undefined;
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function resolveAuthOverride(extra?: MessageExtraInfo): AuthOverride | null {
+  const token = extra?.authInfo?.token;
+  const tokenType = extra?.authInfo?.extra?.tokenType;
+  const headers = extra?.requestInfo?.headers;
+  const existing = getAuthOverride();
+
+  const workspaceId = normalizeHeaderValue(headers?.['x-contextstream-workspace-id']) ||
+    normalizeHeaderValue(headers?.['x-workspace-id']);
+  const projectId = normalizeHeaderValue(headers?.['x-contextstream-project-id']) ||
+    normalizeHeaderValue(headers?.['x-project-id']);
+
+  if (token) {
+    if (tokenType === 'jwt') {
+      return { jwt: token, workspaceId, projectId };
+    }
+    return { apiKey: token, workspaceId, projectId };
+  }
+
+  if (existing?.apiKey || existing?.jwt) {
+    return {
+      apiKey: existing.apiKey,
+      jwt: existing.jwt,
+      workspaceId: workspaceId ?? existing.workspaceId,
+      projectId: projectId ?? existing.projectId,
+    };
+  }
+
+  if (!workspaceId && !projectId) return null;
+
+  return { workspaceId, projectId };
+}
 
 // Light toolset: Core session, project, and basic memory tools (~31 tools)
 const LIGHT_TOOLSET = new Set<string>([
@@ -470,43 +509,50 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
    */
   function wrapWithAutoContext<T, R>(
     toolName: string,
-    handler: (input: T) => Promise<R>
-  ): (input: T) => Promise<R> {
+    handler: (input: T, extra?: MessageExtraInfo) => Promise<R>
+  ): (input: T, extra?: MessageExtraInfo) => Promise<R> {
     if (!sessionManager) {
-      return handler; // No session manager = no auto-context
+      return async (input: T, extra?: MessageExtraInfo): Promise<R> => {
+        const authOverride = resolveAuthOverride(extra);
+        return runWithAuthOverride(authOverride, async () => handler(input, extra));
+      };
     }
 
-    return async (input: T): Promise<R> => {
-      // Skip auto-init for session_init itself
-      const skipAutoInit = toolName === 'session_init';
+    return async (input: T, extra?: MessageExtraInfo): Promise<R> => {
+      const authOverride = resolveAuthOverride(extra);
 
-      let contextPrefix = '';
+      return runWithAuthOverride(authOverride, async () => {
+        // Skip auto-init for session_init itself
+        const skipAutoInit = toolName === 'session_init';
 
-      if (!skipAutoInit) {
-        const autoInitResult = await sessionManager.autoInitialize();
-        if (autoInitResult) {
-          contextPrefix = autoInitResult.contextSummary + '\n\n';
+        let contextPrefix = '';
+
+        if (!skipAutoInit) {
+          const autoInitResult = await sessionManager.autoInitialize();
+          if (autoInitResult) {
+            contextPrefix = autoInitResult.contextSummary + '\n\n';
+          }
         }
-      }
 
-      // Warn if context_smart hasn't been called yet
-      sessionManager.warnIfContextSmartNotCalled(toolName);
+        // Warn if context_smart hasn't been called yet
+        sessionManager.warnIfContextSmartNotCalled(toolName);
 
-      // Call the original handler
-      const result = await handler(input);
+        // Call the original handler
+        const result = await handler(input, extra);
 
-      // Prepend context to the response if we auto-initialized
-      if (contextPrefix && result && typeof result === 'object') {
-        const r = result as { content?: Array<{ type: string; text: string }> };
-        if (r.content && r.content.length > 0 && r.content[0].type === 'text') {
-          r.content[0] = {
-            ...r.content[0],
-            text: contextPrefix + '--- Tool Response ---\n\n' + r.content[0].text,
-          };
+        // Prepend context to the response if we auto-initialized
+        if (contextPrefix && result && typeof result === 'object') {
+          const r = result as { content?: Array<{ type: string; text: string }> };
+          if (r.content && r.content.length > 0 && r.content[0].type === 'text') {
+            r.content[0] = {
+              ...r.content[0],
+              text: contextPrefix + '--- Tool Response ---\n\n' + r.content[0].text,
+            };
+          }
         }
-      }
 
-      return result;
+        return result;
+      });
     };
   }
 
@@ -517,7 +563,7 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
   function registerTool<T extends z.ZodType>(
     name: string,
     config: { title: string; description: string; inputSchema: T },
-    handler: (input: z.infer<T>) => Promise<ToolTextResult>
+    handler: (input: z.infer<T>, extra?: MessageExtraInfo) => Promise<ToolTextResult>
   ) {
     if (toolAllowlist && !toolAllowlist.has(name)) {
       return;
@@ -531,12 +577,12 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     };
 
     // Wrap handler with error handling to ensure proper serialization
-    const safeHandler = async (input: z.infer<T>) => {
+    const safeHandler = async (input: z.infer<T>, extra?: MessageExtraInfo) => {
       try {
         const gated = await gateIfProTool(name);
         if (gated) return gated;
 
-        return await handler(input);
+        return await handler(input, extra);
       } catch (error: any) {
         // Convert error to a properly serializable format
         const errorMessage = error?.message || String(error);

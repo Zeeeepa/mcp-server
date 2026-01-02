@@ -1,4 +1,5 @@
 import type { Config } from './config.js';
+import { getAuthOverride } from './auth-context.js';
 
 export class HttpError extends Error {
   status: number;
@@ -69,7 +70,10 @@ export async function request<T>(
   path: string,
   options: RequestOptions = {}
 ): Promise<T> {
-  const { apiUrl, apiKey, jwt, userAgent } = config;
+  const { apiUrl, userAgent } = config;
+  const authOverride = getAuthOverride();
+  const apiKey = authOverride?.apiKey ?? config.apiKey;
+  const jwt = authOverride?.jwt ?? config.jwt;
   // Ensure path has /api/v1 prefix
   const apiPath = path.startsWith('/api/') ? path : `/api/v1${path}`;
   const url = `${apiUrl.replace(/\/$/, '')}${apiPath}`;
@@ -87,6 +91,7 @@ export async function request<T>(
   if (apiKey) headers['X-API-Key'] = apiKey;
   if (jwt) headers['Authorization'] = `Bearer ${jwt}`;
   const workspaceId =
+    authOverride?.workspaceId ||
     options.workspaceId ||
     inferWorkspaceIdFromBody(options.body) ||
     inferWorkspaceIdFromPath(apiPath) ||

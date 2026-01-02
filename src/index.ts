@@ -7,6 +7,7 @@ import { registerResources } from './resources.js';
 // Note: Prompts are disabled as they're confusing - users can just use natural language directly
 // import { registerPrompts } from './prompts.js';
 import { SessionManager } from './session-manager.js';
+import { runHttpGateway } from './http-gateway.js';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -61,20 +62,28 @@ Usage:
   npx -y @contextstream/mcp-server
   contextstream-mcp
   contextstream-mcp setup
+  contextstream-mcp http
 
 Commands:
   setup   Interactive onboarding wizard (rules + workspace mapping)
+  http    Run HTTP MCP gateway (streamable HTTP transport)
 
 Environment variables:
   CONTEXTSTREAM_API_URL   Base API URL (e.g. https://api.contextstream.io)
   CONTEXTSTREAM_API_KEY   API key for authentication (or use CONTEXTSTREAM_JWT)
   CONTEXTSTREAM_JWT       JWT for authentication (alternative to API key)
+  CONTEXTSTREAM_ALLOW_HEADER_AUTH  Allow header-based auth when no API key/JWT is set
   CONTEXTSTREAM_WORKSPACE_ID  Optional default workspace ID
   CONTEXTSTREAM_PROJECT_ID    Optional default project ID
   CONTEXTSTREAM_TOOLSET       Tool mode: light|standard|complete (default: standard)
   CONTEXTSTREAM_TOOL_ALLOWLIST Optional comma-separated tool names to expose (overrides toolset)
   CONTEXTSTREAM_PRO_TOOLS     Optional comma-separated PRO tool names (default: AI tools)
   CONTEXTSTREAM_UPGRADE_URL   Optional upgrade URL shown for PRO tools on Free plan
+  MCP_HTTP_HOST          HTTP gateway host (default: 0.0.0.0)
+  MCP_HTTP_PORT          HTTP gateway port (default: 8787)
+  MCP_HTTP_PATH          HTTP gateway path (default: /mcp)
+  MCP_HTTP_REQUIRE_AUTH  Require auth headers for HTTP gateway (default: true)
+  MCP_HTTP_JSON_RESPONSE Enable JSON responses (default: false)
 
 Examples:
   CONTEXTSTREAM_API_URL="https://api.contextstream.io" \\
@@ -105,6 +114,18 @@ async function main() {
 
   if (args[0] === 'setup') {
     await runSetupWizard(args.slice(1));
+    return;
+  }
+
+  if (args[0] === 'http') {
+    if (
+      !process.env.CONTEXTSTREAM_API_KEY &&
+      !process.env.CONTEXTSTREAM_JWT &&
+      !process.env.CONTEXTSTREAM_ALLOW_HEADER_AUTH
+    ) {
+      process.env.CONTEXTSTREAM_ALLOW_HEADER_AUTH = 'true';
+    }
+    await runHttpGateway();
     return;
   }
 
