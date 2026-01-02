@@ -193,9 +193,11 @@ If context still feels missing, increase \`max_tokens\` and/or call \`session_re
 
 ### Search, Graphs, and Code Intelligence (ContextStream-first)
 
+- Default order: \`session_smart_search\` -> \`search_hybrid\`/\`search_keyword\`/\`search_semantic\` -> graph tools -> local repo scans (rg/ls/find) only if ContextStream returns no results.
 - Use \`session_smart_search\` before scanning the repo or grepping.
 - Use \`search_semantic\`/\`search_hybrid\`/\`search_keyword\` for targeted queries.
 - For dependencies/impact/call paths, use \`graph_dependencies\`, \`graph_impact\`, and \`graph_call_path\`.
+- If the toolset is complete (Elite), prefer \`graph_call_path\` and \`graph_path\` for call relationships instead of manual searches.
 - If the graph is missing or stale, run \`graph_ingest\` (async by default with \`wait: false\`). Tell the user it can take a few minutes; optionally call \`projects_statistics\` to estimate time.
 
 ---
@@ -276,8 +278,8 @@ const CONTEXTSTREAM_RULES_MINIMAL = `
 - Every user message: \`context_smart(user_message="<user_message>", format="minified", max_tokens=400)\` BEFORE answering.
   - Use \`max_tokens=200\` for trivial/local edits, \`max_tokens=800\` for deep debugging/architecture.
 - Before risky/non-trivial work: check \`session_get_lessons(query="<topic>")\`; use \`session_get_user_context\` when preferences/style matter.
-- For discovery: use \`session_smart_search\` first; use \`search_semantic\`/\`search_hybrid\`/\`search_keyword\` for targeted lookups.
-- For code intelligence: use \`graph_dependencies\`/\`graph_impact\`/\`graph_call_path\`; run \`graph_ingest\` if the graph is missing (async by default, can take a few minutes).
+- For discovery: use \`session_smart_search\` first; use \`search_semantic\`/\`search_hybrid\`/\`search_keyword\` for targeted lookups; avoid local scans until ContextStream returns no results.
+- For code intelligence: use \`graph_dependencies\`/\`graph_impact\`/\`graph_call_path\`; if the toolset is complete (Elite), prefer \`graph_call_path\`/\`graph_path\` for call relationships; run \`graph_ingest\` if the graph is missing (async by default, can take a few minutes).
 - For distillation: use \`session_summary\` for quick context; use \`session_compress\` for long chats; use \`memory_summary\` or \`memory_distill_event\` to condense memory.
 - After meaningful work/decisions/preferences: \`session_capture(event_type=decision|preference|task|insight, title="...", content="...")\`.
 - On frustration/corrections/tool mistakes: \`session_capture_lesson(...)\`.

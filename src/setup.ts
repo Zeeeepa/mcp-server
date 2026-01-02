@@ -625,17 +625,30 @@ export async function runSetupWizard(args: string[]): Promise<void> {
     const modeChoice = normalizeInput(await rl.question('Choose [1/2] (default 1): ')) || '1';
     const mode: RuleMode = modeChoice === '2' ? 'full' : 'minimal';
 
+    const detectedPlanName = await client.getPlanName();
+    const detectedGraphTier = await client.getGraphTier();
+    const graphTierLabel =
+      detectedGraphTier === 'full'
+        ? 'full graph'
+        : detectedGraphTier === 'lite'
+          ? 'graph-lite'
+          : 'none';
+    const planLabel = detectedPlanName ?? 'unknown';
+    console.log(`\nDetected plan: ${planLabel} (graph: ${graphTierLabel})`);
+
     // Toolset selection
     console.log('\nMCP toolset (which tools to expose to the AI):');
     console.log('  1) Light — core session, project, and basic memory/graph tools (~30 tools)');
     console.log('     Best for: faster responses, simpler workflows, resource-constrained environments');
     console.log('  2) Standard (recommended) — adds workspace, memory CRUD, graph analysis, search (~50 tools)');
-    console.log('     Best for: most users, full development workflow with memory and code analysis');
-    console.log('  3) Complete — all tools including AI, GitHub, Slack integrations (~86 tools)');
-    console.log('     Best for: power users needing integrations and advanced features');
+    console.log('     Best for: most users, full development workflow with memory + code analysis');
+    console.log('  3) Complete — all tools including full graph + AI, GitHub, Slack integrations (~86 tools)');
+    console.log('     Best for: Elite users or power users needing full graph + integrations');
     console.log('');
+    console.log('  Tip: Elite users should choose Complete to unlock full graph tools (call path, path, circular, unused).');
     console.log('  Tip: Change later by setting CONTEXTSTREAM_TOOLSET=light|standard|complete');
-    const toolsetChoice = normalizeInput(await rl.question('Choose [1/2/3] (default 2): ')) || '2';
+    const toolsetDefault = detectedGraphTier === 'full' ? '3' : '2';
+    const toolsetChoice = normalizeInput(await rl.question(`Choose [1/2/3] (default ${toolsetDefault}): `)) || toolsetDefault;
     const toolset: Toolset = toolsetChoice === '1' ? 'light' : toolsetChoice === '3' ? 'complete' : 'standard';
 
     const editors: EditorKey[] = ['codex', 'claude', 'cursor', 'windsurf', 'cline', 'kilo', 'roo', 'aider'];
@@ -992,6 +1005,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
     console.log('- Prefer ContextStream search first: use session_smart_search (or mcp__contextstream__session_smart_search) before raw repo scans (rg/ls/find).');
     console.log('- If any tools require UI-based MCP setup (e.g. Cline/Kilo/Roo global), follow https://contextstream.io/docs/mcp.');
     if (toolset === 'complete') {
+      console.log('- For full graph tools, run graph_ingest once per project (async; can take a few minutes).');
       console.log('- Note: Claude Code/Desktop may warn about large tool contexts. This is expected with the complete toolset.');
     }
   } finally {
