@@ -1,9 +1,9 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
-  "name": "io.github.contextstream/mcp-server",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.contextstreamio/mcp-server",
   "title": "ContextStream MCP Server",
   "description": "ContextStream MCP server for code context, memory, search, and AI tools.",
-  "version": "0.3.61",
+  "version": "0.3.62",
   "repository": {
     "url": "https://github.com/contextstream/mcp-server",
     "source": "github"
@@ -20,7 +20,7 @@
     {
       "registryType": "npm",
       "identifier": "@contextstream/mcp-server",
-      "version": "0.3.61",
+      "version": "0.3.62",
       "transport": { "type": "stdio" }
     }
   ]
