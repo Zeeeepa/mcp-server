@@ -207,6 +207,41 @@ function toStructured(data: unknown): StructuredContent {
   return undefined;
 }
 
+function readStatNumber(payload: unknown, key: string): number | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const direct = (payload as Record<string, unknown>)[key];
+  if (typeof direct === 'number') return direct;
+  const nested = (payload as Record<string, unknown>).data;
+  if (nested && typeof nested === 'object') {
+    const nestedValue = (nested as Record<string, unknown>)[key];
+    if (typeof nestedValue === 'number') return nestedValue;
+  }
+  return undefined;
+}
+
+function estimateGraphIngestMinutes(stats: unknown): { min: number; max: number; basis?: string } | null {
+  const totalFiles = readStatNumber(stats, 'total_files');
+  const totalLines = readStatNumber(stats, 'total_lines');
+  if (!totalFiles && !totalLines) return null;
+
+  const fileScore = totalFiles ? totalFiles / 1000 : 0;
+  const lineScore = totalLines ? totalLines / 50000 : 0;
+  const sizeScore = Math.max(fileScore, lineScore);
+
+  const minMinutes = Math.min(45, Math.max(1, Math.round(1 + sizeScore * 1.5)));
+  const maxMinutes = Math.min(60, Math.max(minMinutes + 1, Math.round(2 + sizeScore * 3)));
+
+  const basisParts = [];
+  if (totalFiles) basisParts.push(`${totalFiles.toLocaleString()} files`);
+  if (totalLines) basisParts.push(`${totalLines.toLocaleString()} lines`);
+
+  return {
+    min: minMinutes,
+    max: maxMinutes,
+    basis: basisParts.length > 0 ? basisParts.join(' / ') : undefined,
+  };
+}
+
 function normalizeLessonField(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
 }
@@ -299,7 +334,10 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     return proTools.has(toolName) ? 'pro' : 'free';
   }
 
-  function getToolAccessLabel(toolName: string): 'Free' | 'PRO' {
+  function getToolAccessLabel(toolName: string): 'Free' | 'PRO' | 'Pro (Graph-Lite)' | 'Elite/Team (Full Graph)' {
+    const graphTier = graphToolTiers.get(toolName);
+    if (graphTier === 'lite') return 'Pro (Graph-Lite)';
+    if (graphTier === 'full') return 'Elite/Team (Full Graph)';
     return getToolAccessTier(toolName) === 'pro' ? 'PRO' : 'Free';
   }
 
@@ -312,6 +350,107 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     return errorResult(
       [
         `Access denied: \`${toolName}\` requires ContextStream PRO.`,
+        `Upgrade: ${upgradeUrl}`,
+      ].join('\n')
+    );
+  }
+
+  const graphToolTiers = new Map<string, 'lite' | 'full'>([
+    ['graph_dependencies', 'lite'],
+    ['graph_impact', 'lite'],
+    ['graph_related', 'full'],
+    ['graph_decisions', 'full'],
+    ['graph_path', 'full'],
+    ['graph_call_path', 'full'],
+    ['graph_circular_dependencies', 'full'],
+    ['graph_unused_code', 'full'],
+    ['graph_ingest', 'full'],
+    ['graph_contradictions', 'full'],
+  ]);
+
+  const graphLiteMaxDepth = 1;
+
+  function normalizeGraphTargetType(value: unknown): string {
+    return String(value ?? '').trim().toLowerCase();
+  }
+
+  function isModuleTargetType(value: string): boolean {
+    return value === 'module' || value === 'file' || value === 'path';
+  }
+
+  function graphLiteConstraintError(toolName: string, detail: string): ToolTextResult {
+    return errorResult(
+      [
+        `Access denied: \`${toolName}\` is limited to Graph-Lite (module-level, 1-hop queries).`,
+        detail,
+        `Upgrade to Elite or Team for full graph access: ${upgradeUrl}`,
+      ].join('\n')
+    );
+  }
+
+  async function gateIfGraphTool(toolName: string, input?: any): Promise<ToolTextResult | null> {
+    const requiredTier = graphToolTiers.get(toolName);
+    if (!requiredTier) return null;
+
+    const graphTier = await client.getGraphTier();
+
+    if (graphTier === 'full') return null;
+
+    if (graphTier === 'lite') {
+      if (requiredTier === 'full') {
+        return errorResult(
+          [
+            `Access denied: \`${toolName}\` requires Elite or Team (Full Graph).`,
+            'Pro includes Graph-Lite (module-level dependencies and 1-hop impact only).',
+            `Upgrade: ${upgradeUrl}`,
+          ].join('\n')
+        );
+      }
+
+      if (toolName === 'graph_dependencies') {
+        const targetType = normalizeGraphTargetType(input?.target?.type);
+        if (!isModuleTargetType(targetType)) {
+          return graphLiteConstraintError(
+            toolName,
+            'Set target.type to module, file, or path.'
+          );
+        }
+        if (typeof input?.max_depth === 'number' && input.max_depth > graphLiteMaxDepth) {
+          return graphLiteConstraintError(
+            toolName,
+            `Set max_depth to ${graphLiteMaxDepth} or lower.`
+          );
+        }
+        if (input?.include_transitive === true) {
+          return graphLiteConstraintError(
+            toolName,
+            'Set include_transitive to false.'
+          );
+        }
+      }
+
+      if (toolName === 'graph_impact') {
+        const targetType = normalizeGraphTargetType(input?.target?.type);
+        if (!isModuleTargetType(targetType)) {
+          return graphLiteConstraintError(
+            toolName,
+            'Set target.type to module, file, or path.'
+          );
+        }
+        if (typeof input?.max_depth === 'number' && input.max_depth > graphLiteMaxDepth) {
+          return graphLiteConstraintError(
+            toolName,
+            `Set max_depth to ${graphLiteMaxDepth} or lower.`
+          );
+        }
+      }
+
+      return null;
+    }
+
+    return errorResult(
+      [
+        `Access denied: \`${toolName}\` requires ContextStream Pro (Graph-Lite) or Elite/Team (Full Graph).`,
         `Upgrade: ${upgradeUrl}`,
       ].join('\n')
     );
@@ -384,10 +523,11 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
       return;
     }
     const accessLabel = getToolAccessLabel(name);
+    const showUpgrade = accessLabel !== 'Free';
     const labeledConfig = {
       ...config,
       title: `${config.title} (${accessLabel})`,
-      description: `${config.description}\n\nAccess: ${accessLabel}${accessLabel === 'PRO' ? ` (upgrade: ${upgradeUrl})` : ''}`,
+      description: `${config.description}\n\nAccess: ${accessLabel}${showUpgrade ? ` (upgrade: ${upgradeUrl})` : ''}`,
     };
 
     // Wrap handler with error handling to ensure proper serialization
@@ -937,6 +1077,8 @@ Access: Free`,
       }),
     },
     async (input) => {
+      const gate = await gateIfGraphTool('graph_related', input);
+      if (gate) return gate;
       const result = await client.graphRelated(input);
       return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
     }
@@ -955,6 +1097,8 @@ Access: Free`,
       }),
     },
     async (input) => {
+      const gate = await gateIfGraphTool('graph_path', input);
+      if (gate) return gate;
       const result = await client.graphPath(input);
       return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
     }
@@ -972,6 +1116,8 @@ Access: Free`,
       }),
     },
     async (input) => {
+      const gate = await gateIfGraphTool('graph_decisions', input);
+      if (gate) return gate;
       const result = await client.graphDecisions(input);
       return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
     }
@@ -981,9 +1127,7 @@ Access: Free`,
     'graph_dependencies',
     {
       title: 'Code dependencies',
-      description: `Dependency graph query
-
-Access: Free`,
+      description: 'Dependency graph query',
       inputSchema: z.object({
         target: z.object({
           type: z.string().describe('Code element type. Accepted values: module (aliases: file, path), function (alias: method), type (aliases: struct, enum, trait, class), variable (aliases: data, const, constant). For knowledge/memory nodes, use graph_path with UUID ids instead.'),
@@ -994,6 +1138,8 @@ Access: Free`,
       }),
     },
     async (input) => {
+      const gate = await gateIfGraphTool('graph_dependencies', input);
+      if (gate) return gate;
       const result = await client.graphDependencies(input);
       return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
     }
@@ -1003,9 +1149,7 @@ Access: Free`,
     'graph_call_path',
     {
       title: 'Call path',
-      description: `Find call path between two targets
-
-Access: Free`,
+      description: 'Find call path between two targets',
       inputSchema: z.object({
         source: z.object({
           type: z.string().describe('Must be "function" (alias: method). Only function types are supported for call path analysis. For knowledge/memory nodes, use graph_path with UUID ids instead.'),
@@ -1019,6 +1163,8 @@ Access: Free`,
       }),
     },
     async (input) => {
+      const gate = await gateIfGraphTool('graph_call_path', input);
+      if (gate) return gate;
       const result = await client.graphCallPath(input);
       return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
     }
@@ -1028,9 +1174,7 @@ Access: Free`,
     'graph_impact',
     {
       title: 'Impact analysis',
-      description: `Analyze impact of a target node
-
-Access: Free`,
+      description: 'Analyze impact of a target node',
       inputSchema: z.object({
         target: z.object({
           type: z.string().describe('Code element type. Accepted values: module (aliases: file, path), function (alias: method), type (aliases: struct, enum, trait, class), variable (aliases: data, const, constant). For knowledge/memory nodes, use graph_path with UUID ids instead.'),
@@ -1040,6 +1184,8 @@ Access: Free`,
       }),
     },
     async (input) => {
+      const gate = await gateIfGraphTool('graph_impact', input);
+      if (gate) return gate;
       const result = await client.graphImpact(input);
       return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
     }
@@ -1049,20 +1195,47 @@ Access: Free`,
     'graph_ingest',
     {
       title: 'Ingest code graph',
-      description: 'Build and persist the dependency graph for a project',
+      description: 'Build and persist the dependency graph for a project. Runs async by default (wait=false) and can take a few minutes for larger repos.',
       inputSchema: z.object({
         project_id: z.string().uuid().optional(),
-        wait: z.boolean().optional().describe('If true, wait for ingestion to finish before returning.'),
+        wait: z.boolean().optional().describe('If true, wait for ingestion to finish before returning. Defaults to false (async).'),
       }),
     },
     async (input) => {
+      const gate = await gateIfGraphTool('graph_ingest', input);
+      if (gate) return gate;
       const projectId = resolveProjectId(input.project_id);
       if (!projectId) {
         return errorResult('Error: project_id is required. Please call session_init first or provide project_id explicitly.');
       }
 
-      const result = await client.graphIngest({ project_id: projectId, wait: input.wait });
-      return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+      const wait = input.wait ?? false;
+      let estimate: { min: number; max: number; basis?: string } | null = null;
+
+      try {
+        const stats = await client.projectStatistics(projectId);
+        estimate = estimateGraphIngestMinutes(stats);
+      } catch (error) {
+        console.error('[ContextStream] Failed to fetch project statistics for graph ingest estimate:', error);
+      }
+
+      const result = await client.graphIngest({ project_id: projectId, wait });
+      const estimateText = estimate
+        ? `Estimated time: ${estimate.min}-${estimate.max} min${estimate.basis ? ` (based on ${estimate.basis})` : ''}.`
+        : 'Estimated time varies with repo size.';
+      const note = `Graph ingestion is running ${wait ? 'synchronously' : 'asynchronously'} and can take a few minutes. ${estimateText}`;
+      const structured = toStructured(result);
+      const structuredContent = structured && typeof structured === 'object'
+        ? { ...structured, wait, note, ...(estimate ? { estimate_minutes: { min: estimate.min, max: estimate.max }, estimate_basis: estimate.basis } : {}) }
+        : { wait, note, ...(estimate ? { estimate_minutes: { min: estimate.min, max: estimate.max }, estimate_basis: estimate.basis } : {}) };
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `${note}\n${formatContent(result)}`
+        }],
+        structuredContent
+      };
     }
   );
 
@@ -1569,6 +1742,8 @@ Automatically detects code files and skips ignored directories like node_modules
       inputSchema: z.object({ project_id: z.string().uuid().optional() }),
     },
     async (input) => {
+      const gate = await gateIfGraphTool('graph_circular_dependencies', input);
+      if (gate) return gate;
       const projectId = resolveProjectId(input.project_id);
       if (!projectId) {
         return errorResult('Error: project_id is required. Please call session_init first or provide project_id explicitly.');
@@ -1587,6 +1762,8 @@ Automatically detects code files and skips ignored directories like node_modules
       inputSchema: z.object({ project_id: z.string().uuid().optional() }),
     },
     async (input) => {
+      const gate = await gateIfGraphTool('graph_unused_code', input);
+      if (gate) return gate;
       const projectId = resolveProjectId(input.project_id);
       if (!projectId) {
         return errorResult('Error: project_id is required. Please call session_init first or provide project_id explicitly.');
@@ -1605,6 +1782,8 @@ Automatically detects code files and skips ignored directories like node_modules
       inputSchema: z.object({ node_id: z.string().uuid() }),
     },
     async (input) => {
+      const gate = await gateIfGraphTool('graph_contradictions', input);
+      if (gate) return gate;
       const result = await client.findContradictions(input.node_id);
       return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
     }

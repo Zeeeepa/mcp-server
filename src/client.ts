@@ -49,6 +49,23 @@ function normalizeNodeType(input: string): string {
   }
 }
 
+type GraphTier = 'none' | 'lite' | 'full';
+
+function pickString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeGraphTier(value: string): GraphTier | null {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized.includes('full') || normalized.includes('elite') || normalized.includes('team')) return 'full';
+  if (normalized.includes('lite') || normalized.includes('light') || normalized.includes('basic') || normalized.includes('module')) return 'lite';
+  if (normalized.includes('none') || normalized.includes('off') || normalized.includes('disabled') || normalized.includes('free')) return 'none';
+  return null;
+}
+
 const AI_PLAN_TIMEOUT_MS = 50_000;
 const AI_PLAN_RETRIES = 0;
 
@@ -164,6 +181,43 @@ export class ContextStreamClient {
       return typeof planName === 'string' ? planName.toLowerCase() : null;
     } catch {
       return null;
+    }
+  }
+
+  async getGraphTier(): Promise<GraphTier> {
+    try {
+      const balance = await this.getCreditBalance();
+      const plan = balance?.plan ?? {};
+      const features = plan?.features ?? {};
+
+      const tierCandidate =
+        pickString(plan.graph_tier) ||
+        pickString(plan.graphTier) ||
+        pickString(features.graph_tier) ||
+        pickString(features.graphTier) ||
+        pickString(balance?.graph_tier) ||
+        pickString(balance?.graphTier);
+
+      const normalizedTier = tierCandidate ? normalizeGraphTier(tierCandidate) : null;
+      if (normalizedTier) return normalizedTier;
+
+      const planName = pickString(plan.name)?.toLowerCase() ?? null;
+      if (!planName) return 'none';
+
+      if (
+        planName.includes('elite') ||
+        planName.includes('team') ||
+        planName.includes('enterprise') ||
+        planName.includes('business')
+      ) {
+        return 'full';
+      }
+      if (planName.includes('pro')) return 'lite';
+      if (planName.includes('free')) return 'none';
+
+      return 'lite';
+    } catch {
+      return 'none';
     }
   }
 

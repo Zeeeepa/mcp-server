@@ -28,8 +28,14 @@ No special syntax. No commands to learn. Just ask.
 - Memory capture and recall (decisions, preferences, tasks, bugs, lessons)
 - Code search (semantic, hybrid, keyword, pattern)
 - Knowledge graph and code analysis (dependencies, impact, call paths, circular deps, unused code)
+- Graph ingestion for full graph builds (`graph_ingest`)
 - Local repo ingestion for indexing (`projects_ingest_local`)
 - Auto-context: on the first tool call in a new session, the server can auto-initialize context
+
+## Graph tiers
+
+- **Pro (Graph-Lite):** module-level import graph, dependencies, and 1-hop impact
+- **Elite/Team (Full Graph):** module + call + dataflow + type layers, plus `graph_ingest`
 
 ## Requirements
 
