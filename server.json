@@ -3,7 +3,7 @@
   "name": "io.github.contextstreamio/mcp-server",
   "title": "ContextStream MCP Server",
   "description": "ContextStream MCP server for code context, memory, search, and AI tools.",
-  "version": "0.3.63",
+  "version": "0.3.64",
   "repository": {
     "url": "https://github.com/contextstream/mcp-server",
     "source": "github"
@@ -20,8 +20,59 @@
     {
       "registryType": "npm",
       "identifier": "@contextstream/mcp-server",
-      "version": "0.3.63",
-      "transport": { "type": "stdio" }
+      "version": "0.3.64",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ],
+  "icons": [
+    {
+      "src": "https://contextstream.io/favicon.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": [
+        "any"
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.contextstream.io/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {apiKey}",
+          "variables": {
+            "apiKey": {
+              "description": "ContextStream API key or JWT.",
+              "isRequired": true,
+              "isSecret": true,
+              "placeholder": "cbiq_..."
+            }
+          }
+        },
+        {
+          "name": "X-ContextStream-Workspace-Id",
+          "value": "{workspaceId}",
+          "variables": {
+            "workspaceId": {
+              "description": "Optional workspace ID.",
+              "isRequired": false
+            }
+          }
+        },
+        {
+          "name": "X-ContextStream-Project-Id",
+          "value": "{projectId}",
+          "variables": {
+            "projectId": {
+              "description": "Optional project ID.",
+              "isRequired": false
+            }
+          }
+        }
+      ]
     }
   ]
 }

@@ -4,8 +4,7 @@ import { loadConfig } from './config.js';
 import { ContextStreamClient } from './client.js';
 import { registerTools } from './tools.js';
 import { registerResources } from './resources.js';
-// Note: Prompts are disabled as they're confusing - users can just use natural language directly
-// import { registerPrompts } from './prompts.js';
+import { registerPrompts } from './prompts.js';
 import { SessionManager } from './session-manager.js';
 import { runHttpGateway } from './http-gateway.js';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
@@ -13,6 +12,8 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { VERSION, checkForUpdates } from './version.js';
 import { runSetupWizard } from './setup.js';
+
+const ENABLE_PROMPTS = (process.env.CONTEXTSTREAM_ENABLE_PROMPTS || 'true').toLowerCase() !== 'false';
 
 /**
  * Check if this is the first run and show star message if so.
@@ -79,6 +80,7 @@ Environment variables:
   CONTEXTSTREAM_TOOL_ALLOWLIST Optional comma-separated tool names to expose (overrides toolset)
   CONTEXTSTREAM_PRO_TOOLS     Optional comma-separated PRO tool names (default: AI tools)
   CONTEXTSTREAM_UPGRADE_URL   Optional upgrade URL shown for PRO tools on Free plan
+  CONTEXTSTREAM_ENABLE_PROMPTS Enable MCP prompts list (default: true)
   MCP_HTTP_HOST          HTTP gateway host (default: 0.0.0.0)
   MCP_HTTP_PORT          HTTP gateway port (default: 8787)
   MCP_HTTP_PATH          HTTP gateway path (default: /mcp)
@@ -144,7 +146,9 @@ async function main() {
   // Register all MCP components with auto-context enabled
   registerTools(server, client, sessionManager);
   registerResources(server, client, config.apiUrl);
-  // registerPrompts(server); // Disabled - users can just use natural language directly
+  if (ENABLE_PROMPTS) {
+    registerPrompts(server);
+  }
 
   // Log startup info (to stderr to not interfere with stdio protocol)
   console.error(`ContextStream MCP server v${VERSION} starting...`);

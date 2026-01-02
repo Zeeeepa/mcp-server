@@ -1,8 +1,8 @@
-import { z } from 'zod';
+import { z, type ZodRawShape } from 'zod';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { MessageExtraInfo } from '@modelcontextprotocol/sdk/types.js';
+import type { MessageExtraInfo, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import type { ContextStreamClient } from './client.js';
 import { readFilesFromDirectory, readAllFilesInBatches, countIndexableFiles } from './files.js';
 import { SessionManager } from './session-manager.js';
@@ -20,6 +20,225 @@ type ToolTextResult = {
 
 const LESSON_DEDUP_WINDOW_MS = 2 * 60 * 1000;
 const recentLessonCaptures = new Map<string, number>();
+
+const DEFAULT_PARAM_DESCRIPTIONS: Record<string, string> = {
+  api_key: 'ContextStream API key.',
+  apiKey: 'ContextStream API key.',
+  jwt: 'ContextStream JWT for authentication.',
+  workspace_id: 'Workspace ID (UUID).',
+  workspaceId: 'Workspace ID (UUID).',
+  project_id: 'Project ID (UUID).',
+  projectId: 'Project ID (UUID).',
+  node_id: 'Node ID (UUID).',
+  event_id: 'Event ID (UUID).',
+  reminder_id: 'Reminder ID (UUID).',
+  folder_path: 'Absolute path to the local folder.',
+  file_path: 'Filesystem path to the file.',
+  path: 'Filesystem path.',
+  name: 'Name for the resource.',
+  title: 'Short descriptive title.',
+  description: 'Short description.',
+  content: 'Full content/body.',
+  query: 'Search query string.',
+  limit: 'Maximum number of results to return.',
+  page: 'Page number for pagination.',
+  page_size: 'Results per page.',
+  include_decisions: 'Include related decisions.',
+  include_related: 'Include related context.',
+  include_transitive: 'Include transitive dependencies.',
+  max_depth: 'Maximum traversal depth.',
+  since: 'ISO 8601 timestamp to query changes since.',
+  remind_at: 'ISO 8601 datetime for the reminder.',
+  priority: 'Priority level.',
+  recurrence: 'Recurrence pattern (daily, weekly, monthly).',
+  keywords: 'Keywords for matching.',
+  overwrite: 'Allow overwriting existing files on disk.',
+  write_to_disk: 'Write ingested files to disk before indexing.',
+  await_indexing: 'Wait for indexing to finish before returning.',
+  auto_index: 'Automatically index on creation.',
+  session_id: 'Session identifier.',
+  context_hint: 'User message used to fetch relevant context.',
+  context: 'Context to match relevant reminders.',
+};
+
+const WRITE_VERBS = new Set([
+  'create',
+  'update',
+  'delete',
+  'ingest',
+  'index',
+  'capture',
+  'remember',
+  'associate',
+  'bootstrap',
+  'snooze',
+  'complete',
+  'dismiss',
+  'generate',
+  'sync',
+  'publish',
+  'set',
+  'add',
+  'remove',
+  'revoke',
+  'upload',
+  'compress',
+  'init',
+]);
+
+const READ_ONLY_OVERRIDES = new Set([
+  'session_tools',
+  'context_smart',
+  'session_summary',
+  'session_recall',
+  'session_get_user_context',
+  'session_get_lessons',
+  'session_smart_search',
+  'session_delta',
+  'projects_list',
+  'projects_get',
+  'projects_overview',
+  'projects_statistics',
+  'projects_files',
+  'projects_index_status',
+  'workspaces_list',
+  'workspaces_get',
+  'memory_search',
+  'memory_decisions',
+  'memory_get_event',
+  'memory_list_events',
+  'memory_list_nodes',
+  'memory_summary',
+  'memory_timeline',
+  'graph_related',
+  'graph_decisions',
+  'graph_path',
+  'graph_dependencies',
+  'graph_call_path',
+  'graph_impact',
+  'graph_circular_dependencies',
+  'graph_unused_code',
+  'search_semantic',
+  'search_hybrid',
+  'search_keyword',
+  'search_pattern',
+  'reminders_list',
+  'reminders_active',
+  'auth_me',
+  'mcp_server_version',
+]);
+
+const DESTRUCTIVE_VERBS = new Set(['delete', 'dismiss', 'remove', 'revoke', 'supersede']);
+
+const OPEN_WORLD_PREFIXES = new Set(['github', 'slack', 'integrations']);
+
+function humanizeKey(raw: string): string {
+  const withSpaces = raw.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ');
+  return withSpaces.toLowerCase();
+}
+
+function buildParamDescription(key: string, path: string[]): string {
+  const normalized = key in DEFAULT_PARAM_DESCRIPTIONS ? key : key.toLowerCase();
+  const parent = path[path.length - 1];
+
+  if (parent === 'target') {
+    if (key === 'id') return 'Target identifier (module path, function id, etc.).';
+    if (key === 'type') return 'Target type (module, file, function, type, variable).';
+  }
+
+  if (parent === 'source') {
+    if (key === 'id') return 'Source identifier (module path, function id, etc.).';
+    if (key === 'type') return 'Source type (module, file, function, type, variable).';
+  }
+
+  if (DEFAULT_PARAM_DESCRIPTIONS[normalized]) {
+    return DEFAULT_PARAM_DESCRIPTIONS[normalized];
+  }
+
+  if (normalized.endsWith('_id')) {
+    return `ID for the ${humanizeKey(normalized.replace(/_id$/, ''))}.`;
+  }
+
+  if (normalized.startsWith('include_')) {
+    return `Whether to include ${humanizeKey(normalized.replace('include_', ''))}.`;
+  }
+
+  if (normalized.startsWith('max_')) {
+    return `Maximum ${humanizeKey(normalized.replace('max_', ''))}.`;
+  }
+
+  if (normalized.startsWith('min_')) {
+    return `Minimum ${humanizeKey(normalized.replace('min_', ''))}.`;
+  }
+
+  return `Input parameter: ${humanizeKey(normalized)}.`;
+}
+
+function getDescription(schema: z.ZodTypeAny): string | undefined {
+  const def = (schema as { _def?: { description?: string } })._def;
+  if (def?.description && def.description.trim()) return def.description;
+  return undefined;
+}
+
+function applyParamDescriptions(schema: z.ZodTypeAny, path: string[] = []): z.ZodTypeAny {
+  if (!(schema instanceof z.ZodObject)) {
+    return schema;
+  }
+
+  const shape = schema.shape;
+  let changed = false;
+  const nextShape: ZodRawShape = {};
+
+  for (const [key, field] of Object.entries(shape) as Array<[string, z.ZodTypeAny]>) {
+    let nextField: z.ZodTypeAny = field;
+    const existingDescription = getDescription(field);
+
+    if (field instanceof z.ZodObject) {
+      const nested = applyParamDescriptions(field, [...path, key]);
+      if (nested !== field) {
+        nextField = nested;
+        changed = true;
+      }
+    }
+
+    if (existingDescription) {
+      if (!getDescription(nextField)) {
+        nextField = nextField.describe(existingDescription);
+        changed = true;
+      }
+    } else {
+      nextField = nextField.describe(buildParamDescription(key, path));
+      changed = true;
+    }
+
+    nextShape[key] = nextField;
+  }
+
+  if (!changed) return schema;
+
+  let nextSchema: z.ZodTypeAny = z.object(nextShape);
+  const def = (schema as { _def?: { catchall?: z.ZodTypeAny; unknownKeys?: string } })._def;
+  if (def?.catchall) nextSchema = (nextSchema as z.ZodObject<any>).catchall(def.catchall);
+  if (def?.unknownKeys === 'passthrough') nextSchema = (nextSchema as z.ZodObject<any>).passthrough();
+  if (def?.unknownKeys === 'strict') nextSchema = (nextSchema as z.ZodObject<any>).strict();
+
+  return nextSchema;
+}
+
+function inferToolAnnotations(toolName: string): ToolAnnotations {
+  const parts = toolName.split('_');
+  const prefix = parts[0] || toolName;
+  const readOnly = READ_ONLY_OVERRIDES.has(toolName) || !parts.some((part) => WRITE_VERBS.has(part));
+  const destructive = readOnly ? false : parts.some((part) => DESTRUCTIVE_VERBS.has(part));
+  const openWorld = OPEN_WORLD_PREFIXES.has(prefix);
+
+  return {
+    readOnlyHint: readOnly,
+    destructiveHint: readOnly ? false : destructive,
+    idempotentHint: readOnly,
+    openWorldHint: openWorld,
+  };
+}
 
 function normalizeHeaderValue(value: string | string[] | undefined): string | undefined {
   if (!value) return undefined;
@@ -575,6 +794,14 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
       title: `${config.title} (${accessLabel})`,
       description: `${config.description}\n\nAccess: ${accessLabel}${showUpgrade ? ` (upgrade: ${upgradeUrl})` : ''}`,
     };
+    const annotatedConfig = {
+      ...labeledConfig,
+      inputSchema: labeledConfig.inputSchema ? applyParamDescriptions(labeledConfig.inputSchema) : undefined,
+      annotations: {
+        ...inferToolAnnotations(name),
+        ...(labeledConfig as { annotations?: ToolAnnotations }).annotations,
+      },
+    };
 
     // Wrap handler with error handling to ensure proper serialization
     const safeHandler = async (input: z.infer<T>, extra?: MessageExtraInfo) => {
@@ -614,7 +841,7 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     
     server.registerTool(
       name,
-      labeledConfig,
+      annotatedConfig,
       wrapWithAutoContext(name, safeHandler)
     );
   }

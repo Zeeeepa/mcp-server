@@ -8,6 +8,7 @@ import { loadConfig } from './config.js';
 import { ContextStreamClient } from './client.js';
 import { registerTools } from './tools.js';
 import { registerResources } from './resources.js';
+import { registerPrompts } from './prompts.js';
 import { SessionManager } from './session-manager.js';
 import { VERSION } from './version.js';
 import { runWithAuthOverride, type AuthOverride } from './auth-context.js';
@@ -27,6 +28,12 @@ const PORT = Number.parseInt(process.env.MCP_HTTP_PORT || '8787', 10);
 const MCP_PATH = process.env.MCP_HTTP_PATH || '/mcp';
 const REQUIRE_AUTH = (process.env.MCP_HTTP_REQUIRE_AUTH || 'true').toLowerCase() !== 'false';
 const ENABLE_JSON_RESPONSE = (process.env.MCP_HTTP_JSON_RESPONSE || 'false').toLowerCase() === 'true';
+const ENABLE_PROMPTS = (process.env.CONTEXTSTREAM_ENABLE_PROMPTS || 'true').toLowerCase() !== 'false';
+const WELL_KNOWN_CONFIG_PATH = '/.well-known/mcp-config';
+const WELL_KNOWN_CARD_PATHS = new Set([
+  '/.well-known/mcp.json',
+  '/.well-known/mcp-server.json',
+]);
 
 const sessions = new Map<string, SessionEntry>();
 
@@ -90,6 +97,108 @@ function attachAuthInfo(req: IncomingMessage & { auth?: AuthInfo }, token: strin
   };
 }
 
+function getBaseUrl(req: IncomingMessage): string {
+  const host = req.headers.host || 'localhost';
+  const forwardedProto = normalizeHeaderValue(req.headers['x-forwarded-proto']);
+  const proto = forwardedProto || 'http';
+  return `${proto}://${host}`;
+}
+
+function buildMcpConfigSchema(baseUrl: string): Record<string, unknown> {
+  return {
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    $id: `${baseUrl}${WELL_KNOWN_CONFIG_PATH}`,
+    title: 'ContextStream MCP Session Configuration',
+    description: 'Configuration for connecting to the ContextStream MCP HTTP gateway.',
+    'x-query-style': 'dot+bracket',
+    type: 'object',
+    properties: {
+      apiKey: {
+        type: 'string',
+        title: 'API Key or JWT',
+        description: 'ContextStream API key or JWT used for authentication.',
+      },
+      workspaceId: {
+        type: 'string',
+        title: 'Workspace ID',
+        description: 'Optional workspace ID to scope requests.',
+        format: 'uuid',
+      },
+      projectId: {
+        type: 'string',
+        title: 'Project ID',
+        description: 'Optional project ID to scope requests.',
+        format: 'uuid',
+      },
+    },
+    required: ['apiKey'],
+    additionalProperties: false,
+  };
+}
+
+function buildServerCard(baseUrl: string): Record<string, unknown> {
+  const mcpUrl = `${baseUrl}${MCP_PATH}`;
+  return {
+    $schema: 'https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json',
+    name: 'io.github.contextstreamio/mcp-server',
+    title: 'ContextStream MCP Server',
+    description: 'ContextStream MCP server for code context, memory, search, and AI tools.',
+    version: VERSION,
+    websiteUrl: 'https://contextstream.io/docs/mcp',
+    repository: {
+      url: 'https://github.com/contextstream/mcp-server',
+      source: 'github',
+    },
+    icons: [
+      {
+        src: 'https://contextstream.io/favicon.svg',
+        mimeType: 'image/svg+xml',
+        sizes: ['any'],
+      },
+    ],
+    remotes: [
+      {
+        type: 'streamable-http',
+        url: mcpUrl,
+        headers: [
+          {
+            name: 'Authorization',
+            value: 'Bearer {apiKey}',
+            variables: {
+              apiKey: {
+                description: 'ContextStream API key or JWT.',
+                isRequired: true,
+                isSecret: true,
+                placeholder: 'cbiq_...',
+              },
+            },
+          },
+          {
+            name: 'X-ContextStream-Workspace-Id',
+            value: '{workspaceId}',
+            variables: {
+              workspaceId: {
+                description: 'Optional workspace ID.',
+                isRequired: false,
+              },
+            },
+          },
+          {
+            name: 'X-ContextStream-Project-Id',
+            value: '{projectId}',
+            variables: {
+              projectId: {
+                description: 'Optional project ID.',
+                isRequired: false,
+              },
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
 async function createSession(): Promise<SessionEntry> {
   const config = loadConfig();
   const client = new ContextStreamClient(config);
@@ -101,6 +210,9 @@ async function createSession(): Promise<SessionEntry> {
   const sessionManager = new SessionManager(server, client);
   registerTools(server, client, sessionManager);
   registerResources(server, client, config.apiUrl);
+  if (ENABLE_PROMPTS) {
+    registerPrompts(server);
+  }
 
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
@@ -124,7 +236,7 @@ async function createSession(): Promise<SessionEntry> {
   };
 }
 
-function writeJson(res: ServerResponse, status: number, payload: Record<string, unknown>) {
+function writeJson(res: ServerResponse, status: number, payload: unknown) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(payload));
 }
@@ -186,6 +298,16 @@ export async function runHttpGateway(): Promise<void> {
 
     if (url.pathname === '/health') {
       writeJson(res, 200, { status: 'ok', version: VERSION });
+      return;
+    }
+
+    if (url.pathname === WELL_KNOWN_CONFIG_PATH) {
+      writeJson(res, 200, buildMcpConfigSchema(getBaseUrl(req)));
+      return;
+    }
+
+    if (WELL_KNOWN_CARD_PATHS.has(url.pathname)) {
+      writeJson(res, 200, buildServerCard(getBaseUrl(req)));
       return;
     }
 
