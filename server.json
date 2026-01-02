@@ -3,7 +3,7 @@
   "name": "io.github.contextstreamio/mcp-server",
   "title": "ContextStream MCP Server",
   "description": "ContextStream MCP server for code context, memory, search, and AI tools.",
-  "version": "0.3.64",
+  "version": "0.3.65",
   "repository": {
     "url": "https://github.com/contextstream/mcp-server",
     "source": "github"
@@ -20,7 +20,7 @@
     {
       "registryType": "npm",
       "identifier": "@contextstream/mcp-server",
-      "version": "0.3.64",
+      "version": "0.3.65",
       "transport": {
         "type": "stdio"
       }
@@ -32,6 +32,13 @@
       "mimeType": "image/svg+xml",
       "sizes": [
         "any"
+      ]
+    },
+    {
+      "src": "https://contextstream.io/logo.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "512x512"
       ]
     }
   ],

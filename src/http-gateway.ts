@@ -116,7 +116,7 @@ function buildMcpConfigSchema(baseUrl: string): Record<string, unknown> {
       apiKey: {
         type: 'string',
         title: 'API Key or JWT',
-        description: 'ContextStream API key or JWT used for authentication.',
+        description: 'Optional ContextStream API key or JWT (required for authenticated tool calls).',
       },
       workspaceId: {
         type: 'string',
@@ -131,7 +131,6 @@ function buildMcpConfigSchema(baseUrl: string): Record<string, unknown> {
         format: 'uuid',
       },
     },
-    required: ['apiKey'],
     additionalProperties: false,
   };
 }
@@ -154,6 +153,11 @@ function buildServerCard(baseUrl: string): Record<string, unknown> {
         src: 'https://contextstream.io/favicon.svg',
         mimeType: 'image/svg+xml',
         sizes: ['any'],
+      },
+      {
+        src: 'https://contextstream.io/logo.png',
+        mimeType: 'image/png',
+        sizes: ['512x512'],
       },
     ],
     remotes: [
