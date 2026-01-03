@@ -103,19 +103,21 @@ export class ContextStreamClient {
     input: T
   ): T {
     const { defaultWorkspaceId, defaultProjectId } = this.config;
-    const workspaceId = input.workspace_id || defaultWorkspaceId;
+    const providedWorkspaceId = this.coerceUuid(input.workspace_id);
+    const workspaceId = providedWorkspaceId || defaultWorkspaceId;
 
     // Only use defaultProjectId if:
     // 1. project_id is not explicitly provided, AND
     // 2. workspace_id matches defaultWorkspaceId (or both are undefined)
     // This prevents using a cached project_id that belongs to a different workspace
-    const useDefaultProject = !input.project_id &&
-      (!input.workspace_id || input.workspace_id === defaultWorkspaceId);
+    const providedProjectId = this.coerceUuid(input.project_id);
+    const useDefaultProject = !providedProjectId &&
+      (!providedWorkspaceId || providedWorkspaceId === defaultWorkspaceId);
 
     return {
       ...input,
       workspace_id: workspaceId,
-      project_id: input.project_id || (useDefaultProject ? defaultProjectId : undefined),
+      project_id: providedProjectId || (useDefaultProject ? defaultProjectId : undefined),
     } as T;
   }
 
@@ -1796,8 +1798,9 @@ export class ContextStreamClient {
 
     // Get workspace info (cached)
     try {
-      const ws = await this.getWorkspace(withDefaults.workspace_id) as { name?: string };
-      workspaceName = ws?.name;
+      const wsResponse = await this.getWorkspace(withDefaults.workspace_id);
+      const ws = unwrapApiResponse<{ name?: string }>(wsResponse);
+      workspaceName = pickString(ws?.name) ?? undefined;
       if (workspaceName) {
         parts.push(`📁 Workspace: ${workspaceName}`);
       }
@@ -1806,8 +1809,9 @@ export class ContextStreamClient {
     // Get project info if specified (cached)
     if (withDefaults.project_id) {
       try {
-        const proj = await this.getProject(withDefaults.project_id) as { name?: string };
-        projectName = proj?.name;
+        const projResponse = await this.getProject(withDefaults.project_id);
+        const proj = unwrapApiResponse<{ name?: string }>(projResponse);
+        projectName = pickString(proj?.name) ?? undefined;
         if (projectName) {
           parts.push(`📂 Project: ${projectName}`);
         }
@@ -2335,6 +2339,8 @@ export class ContextStreamClient {
     token_estimate: number;
     format: string;
     sources_used: number;
+    workspace_id?: string;
+    project_id?: string;
     errors?: string[];
     version_notice?: VersionNotice;
   }> {
@@ -2361,24 +2367,28 @@ export class ContextStreamClient {
 
     // 1. Get workspace/project info (always include, very compact)
     try {
-      const ws = await this.getWorkspace(withDefaults.workspace_id) as { name?: string };
-      if (ws?.name) {
-        items.push({ type: 'W', key: 'workspace', value: ws.name, relevance: 1 });
+      const wsResponse = await this.getWorkspace(withDefaults.workspace_id);
+      const ws = unwrapApiResponse<{ name?: string }>(wsResponse);
+      const workspaceName = pickString(ws?.name);
+      if (workspaceName) {
+        items.push({ type: 'W', key: 'workspace', value: workspaceName, relevance: 1 });
       } else {
         // Workspace exists but no name - still indicate we have context
-        items.push({ type: 'W', key: 'workspace', value: withDefaults.workspace_id!.slice(0, 8), relevance: 1 });
+        items.push({ type: 'W', key: 'workspace', value: `id:${withDefaults.workspace_id}`, relevance: 1 });
       }
     } catch (e) {
       errors.push(`workspace: ${(e as Error)?.message || 'fetch failed'}`);
       // Still add workspace ID so we know context exists
-      items.push({ type: 'W', key: 'workspace', value: `id:${withDefaults.workspace_id!.slice(0, 8)}`, relevance: 0.5 });
+      items.push({ type: 'W', key: 'workspace', value: `id:${withDefaults.workspace_id}`, relevance: 0.5 });
     }
 
     if (withDefaults.project_id) {
       try {
-        const proj = await this.getProject(withDefaults.project_id) as { name?: string };
-        if (proj?.name) {
-          items.push({ type: 'P', key: 'project', value: proj.name, relevance: 1 });
+        const projResponse = await this.getProject(withDefaults.project_id);
+        const proj = unwrapApiResponse<{ name?: string }>(projResponse);
+        const projectName = pickString(proj?.name);
+        if (projectName) {
+          items.push({ type: 'P', key: 'project', value: projectName, relevance: 1 });
         }
       } catch (e) {
         errors.push(`project: ${(e as Error)?.message || 'fetch failed'}`);
@@ -2524,7 +2534,7 @@ export class ContextStreamClient {
     
     // If context is empty but we have workspace, add a hint
     if (context.length === 0 && withDefaults.workspace_id) {
-      const wsHint = items.find(i => i.type === 'W')?.value || withDefaults.workspace_id.slice(0, 8);
+      const wsHint = items.find(i => i.type === 'W')?.value || withDefaults.workspace_id;
       context = format === 'minified'
         ? `W:${wsHint}|[NO_MATCHES]`
         : `[CTX]\nW:${wsHint}\n[NO_MATCHES]\n[/CTX]`;
@@ -2558,6 +2568,8 @@ export class ContextStreamClient {
       token_estimate: Math.ceil(context.length / 4),
       format,
       sources_used: items.filter(i => context.includes(i.value.slice(0, 20))).length,
+      workspace_id: withDefaults.workspace_id,
+      project_id: withDefaults.project_id,
       ...(versionNotice ? { version_notice: versionNotice } : {}),
       ...(errors.length > 0 && { errors }), // Include errors for debugging
     };

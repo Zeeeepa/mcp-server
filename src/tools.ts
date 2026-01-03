@@ -61,6 +61,13 @@ const DEFAULT_PARAM_DESCRIPTIONS: Record<string, string> = {
   context: 'Context to match relevant reminders.',
 };
 
+const uuidSchema = z.string().uuid();
+
+function normalizeUuid(value?: string): string | undefined {
+  if (!value) return undefined;
+  return uuidSchema.safeParse(value).success ? value : undefined;
+}
+
 const WRITE_VERBS = new Set([
   'create',
   'update',
@@ -854,15 +861,17 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
   }
 
   function resolveWorkspaceId(explicitWorkspaceId?: string): string | undefined {
-    if (explicitWorkspaceId) return explicitWorkspaceId;
+    const normalizedExplicit = normalizeUuid(explicitWorkspaceId);
+    if (normalizedExplicit) return normalizedExplicit;
     const ctx = sessionManager?.getContext();
-    return typeof ctx?.workspace_id === 'string' ? (ctx.workspace_id as string) : undefined;
+    return normalizeUuid(typeof ctx?.workspace_id === 'string' ? (ctx.workspace_id as string) : undefined);
   }
 
   function resolveProjectId(explicitProjectId?: string): string | undefined {
-    if (explicitProjectId) return explicitProjectId;
+    const normalizedExplicit = normalizeUuid(explicitProjectId);
+    if (normalizedExplicit) return normalizedExplicit;
     const ctx = sessionManager?.getContext();
-    return typeof ctx?.project_id === 'string' ? (ctx.project_id as string) : undefined;
+    return normalizeUuid(typeof ctx?.project_id === 'string' ? (ctx.project_id as string) : undefined);
   }
 
   async function validateReadableDirectory(inputPath: string): Promise<{ ok: true; resolvedPath: string } | { ok: false; error: string }> {
@@ -2249,11 +2258,12 @@ Memory: events(crud) nodes(knowledge) search(find) decisions(choices)`,
       description: `Retrieve user preferences, coding style, and persona from memory.
 Use this to understand how the user likes to work and adapt your responses accordingly.`,
       inputSchema: z.object({
-        workspace_id: z.string().uuid().optional().describe('Workspace to get user context from'),
+        workspace_id: z.string().optional().describe('Workspace ID (UUID). Invalid values are ignored.'),
       }),
     },
     async (input) => {
-      const result = await client.getUserContext(input);
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      const result = await client.getUserContext({ workspace_id: workspaceId });
       return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
     }
   );
@@ -2660,8 +2670,8 @@ Returns lessons filtered by:
 - Category: workflow, code_quality, verification, communication, project_specific
 - Severity: low, medium, high, critical`,
       inputSchema: z.object({
-        workspace_id: z.string().uuid().optional(),
-        project_id: z.string().uuid().optional(),
+        workspace_id: z.string().optional().describe('Workspace ID (UUID). Invalid values are ignored.'),
+        project_id: z.string().optional().describe('Project ID (UUID). Invalid values are ignored.'),
         query: z.string().optional().describe('Search for relevant lessons (e.g., "git push images")'),
         category: z.enum(['workflow', 'code_quality', 'verification', 'communication', 'project_specific']).optional()
           .describe('Filter by category'),
@@ -2671,17 +2681,8 @@ Returns lessons filtered by:
       }),
     },
     async (input) => {
-      // Get workspace_id from session context if not provided
-      let workspaceId = input.workspace_id;
-      let projectId = input.project_id;
-
-      if (!workspaceId && sessionManager) {
-        const ctx = sessionManager.getContext();
-        if (ctx) {
-          workspaceId = ctx.workspace_id as string | undefined;
-          projectId = projectId || ctx.project_id as string | undefined;
-        }
-      }
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      const projectId = resolveProjectId(input.project_id);
 
       // Build search query with lesson-specific terms
       const searchQuery = input.query
