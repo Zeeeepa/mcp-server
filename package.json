@@ -1,7 +1,7 @@
 {
   "name": "@contextstream/mcp-server",
   "mcpName": "io.github.contextstreamio/mcp-server",
-  "version": "0.3.68",
+  "version": "0.3.69",
   "description": "MCP server exposing ContextStream public API - code context, memory, search, and AI tools for developers",
   "type": "module",
   "license": "MIT",
@@ -15,7 +15,7 @@
   },
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "esbuild src/index.ts --bundle --platform=node --target=node18 --outfile=dist/index.js --format=esm --external:@modelcontextprotocol/sdk && echo '#!/usr/bin/env node' | cat - dist/index.js > dist/index.tmp && mv dist/index.tmp dist/index.js && esbuild src/test-server.ts --bundle --platform=node --target=node18 --outfile=dist/test-server.js --format=esm --external:@modelcontextprotocol/sdk",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node18 --outfile=dist/index.js --format=esm --external:@modelcontextprotocol/sdk --banner:js=\"#!/usr/bin/env node\" && esbuild src/test-server.ts --bundle --platform=node --target=node18 --outfile=dist/test-server.js --format=esm --external:@modelcontextprotocol/sdk",
     "start": "node dist/index.js",
     "test-server": "tsx src/test-server.ts",
     "test-server:start": "node dist/test-server.js",
