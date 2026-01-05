@@ -640,6 +640,201 @@ let clientDetectedFromEnv = false;
 // END CLIENT DETECTION
 // ============================================
 
+// =============================================================================
+// Strategy 5: Progressive Disclosure with Tool Bundles
+// =============================================================================
+// Environment variable to control progressive disclosure mode
+// CONTEXTSTREAM_PROGRESSIVE_MODE=true | false (default: false)
+// When enabled, only core tools are registered initially. AI can call
+// tools_enable_bundle to unlock additional functionality dynamically.
+const PROGRESSIVE_MODE = process.env.CONTEXTSTREAM_PROGRESSIVE_MODE === 'true';
+
+// Bundle definitions - group related tools together
+// The 'core' bundle is always enabled and contains essential tools
+const TOOL_BUNDLES: Record<string, Set<string>> = {
+  // Core bundle (~12 tools) - always enabled, essential for any session
+  core: new Set([
+    'session_init',
+    'session_tools',
+    'context_smart',
+    'context_feedback',
+    'session_capture',
+    'session_capture_lesson',
+    'session_get_lessons',
+    'session_recall',
+    'session_remember',
+    'session_get_user_context',
+    'tools_enable_bundle', // Meta-tool to enable other bundles
+    'auth_me',
+    'mcp_server_version',
+  ]),
+
+  // Session bundle (~6 tools) - extended session management
+  session: new Set([
+    'session_summary',
+    'session_smart_search',
+    'session_compress',
+    'session_delta',
+    'decision_trace',
+    'generate_editor_rules',
+  ]),
+
+  // Memory bundle (~12 tools) - full memory CRUD operations
+  memory: new Set([
+    'memory_create_event',
+    'memory_update_event',
+    'memory_delete_event',
+    'memory_list_events',
+    'memory_get_event',
+    'memory_search',
+    'memory_decisions',
+    'memory_timeline',
+    'memory_summary',
+    'memory_create_node',
+    'memory_update_node',
+    'memory_delete_node',
+    'memory_list_nodes',
+    'memory_get_node',
+    'memory_supersede_node',
+    'memory_distill_event',
+  ]),
+
+  // Search bundle (~4 tools) - search capabilities
+  search: new Set([
+    'search_semantic',
+    'search_hybrid',
+    'search_keyword',
+  ]),
+
+  // Graph bundle (~9 tools) - code graph analysis
+  graph: new Set([
+    'graph_related',
+    'graph_decisions',
+    'graph_path',
+    'graph_dependencies',
+    'graph_call_path',
+    'graph_impact',
+    'graph_circular_dependencies',
+    'graph_unused_code',
+    'graph_ingest',
+  ]),
+
+  // Workspace bundle (~4 tools) - workspace management
+  workspace: new Set([
+    'workspaces_list',
+    'workspaces_get',
+    'workspace_associate',
+    'workspace_bootstrap',
+  ]),
+
+  // Project bundle (~10 tools) - project management and indexing
+  project: new Set([
+    'projects_create',
+    'projects_update',
+    'projects_list',
+    'projects_get',
+    'projects_overview',
+    'projects_statistics',
+    'projects_index',
+    'projects_index_status',
+    'projects_files',
+    'projects_ingest_local',
+  ]),
+
+  // Reminders bundle (~6 tools) - reminder management
+  reminders: new Set([
+    'reminders_list',
+    'reminders_active',
+    'reminders_create',
+    'reminders_snooze',
+    'reminders_complete',
+    'reminders_dismiss',
+  ]),
+
+  // Integrations bundle - Slack/GitHub tools (auto-hidden when not connected)
+  integrations: new Set([
+    'slack_stats',
+    'slack_channels',
+    'slack_search',
+    'slack_discussions',
+    'slack_activity',
+    'slack_contributors',
+    'slack_knowledge',
+    'slack_summary',
+    'slack_sync_users',
+    'github_stats',
+    'github_repos',
+    'github_search',
+    'github_issues',
+    'github_activity',
+    'github_contributors',
+    'github_knowledge',
+    'github_summary',
+    'integrations_status',
+    'integrations_search',
+    'integrations_summary',
+    'integrations_knowledge',
+  ]),
+};
+
+// Track which bundles are currently enabled (runtime state)
+const enabledBundles = new Set<string>(['core']);
+
+// Check if a tool belongs to any enabled bundle
+function isToolInEnabledBundles(toolName: string): boolean {
+  for (const bundleName of enabledBundles) {
+    const bundle = TOOL_BUNDLES[bundleName];
+    if (bundle?.has(toolName)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Find which bundle a tool belongs to
+function findToolBundle(toolName: string): string | null {
+  for (const [bundleName, tools] of Object.entries(TOOL_BUNDLES)) {
+    if (tools.has(toolName)) {
+      return bundleName;
+    }
+  }
+  return null;
+}
+
+// Get bundle info for display
+function getBundleInfo(): Array<{ name: string; size: number; enabled: boolean; description: string }> {
+  const descriptions: Record<string, string> = {
+    core: 'Essential session tools (always enabled)',
+    session: 'Extended session management and utilities',
+    memory: 'Full memory CRUD operations',
+    search: 'Semantic, hybrid, and keyword search',
+    graph: 'Code graph analysis and dependencies',
+    workspace: 'Workspace management',
+    project: 'Project management and indexing',
+    reminders: 'Reminder management',
+    integrations: 'Slack and GitHub integrations',
+  };
+
+  return Object.entries(TOOL_BUNDLES).map(([name, tools]) => ({
+    name,
+    size: tools.size,
+    enabled: enabledBundles.has(name),
+    description: descriptions[name] || `${name} tools`,
+  }));
+}
+
+// Storage for deferred tool registrations (only used in progressive mode)
+type DeferredToolConfig = {
+  name: string;
+  config: { title: string; description: string; inputSchema: z.ZodType };
+  handler: (input: any, extra?: MessageExtraInfo) => Promise<ToolTextResult>;
+};
+const deferredTools = new Map<string, DeferredToolConfig>();
+
+// =============================================================================
+// END Strategy 5
+// =============================================================================
+
 const TOOLSET_ALIASES: Record<string, Set<string> | null> = {
   // Light mode - minimal, fastest
   light: LIGHT_TOOLSET,
@@ -909,6 +1104,17 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
   } else {
     console.error('[ContextStream] Schema mode: full (set CONTEXTSTREAM_SCHEMA_MODE=compact to reduce token overhead)');
   }
+
+  // Log progressive disclosure status (Strategy 5)
+  if (PROGRESSIVE_MODE) {
+    const coreBundle = TOOL_BUNDLES.core;
+    console.error(`[ContextStream] Progressive mode: ENABLED (starting with ${coreBundle.size} core tools)`);
+    console.error('[ContextStream] Use tools_enable_bundle to unlock additional tool bundles dynamically.');
+  }
+
+  // Store server reference for deferred tool registration
+  let serverRef = server;
+
   const defaultProTools = new Set<string>([
     // AI endpoints (typically paid/credit-metered)
     'ai_context',
@@ -1338,22 +1544,15 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
    * - Option B (dynamic): Skip registration if integration tools and integrations not connected
    * - Option A (lazy): Gate at runtime with helpful error if integration not connected
    */
-  function registerTool<T extends z.ZodType>(
+  /**
+   * Actually register a tool with the MCP server.
+   * This is the internal registration function used both at startup and when enabling bundles.
+   */
+  function actuallyRegisterTool<T extends z.ZodType>(
     name: string,
     config: { title: string; description: string; inputSchema: T },
     handler: (input: z.infer<T>, extra?: MessageExtraInfo) => Promise<ToolTextResult>
   ) {
-    // Check toolset allowlist first
-    if (toolAllowlist && !toolAllowlist.has(name)) {
-      return;
-    }
-
-    // Option B: Skip registration for integration tools when auto-hide is enabled
-    // and integrations are not connected. This reduces the tool registry size.
-    if (!shouldRegisterIntegrationTool(name)) {
-      return;
-    }
-
     const accessLabel = getToolAccessLabel(name);
     const showUpgrade = accessLabel !== 'Free';
 
@@ -1362,11 +1561,9 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     let finalSchema: z.ZodTypeAny | undefined;
 
     if (COMPACT_SCHEMA_ENABLED) {
-      // Compact mode: shorter descriptions, no access labels, minimal param descriptions
       finalDescription = compactifyDescription(config.description);
       finalSchema = config.inputSchema ? applyCompactParamDescriptions(config.inputSchema) : undefined;
     } else {
-      // Full mode: verbose descriptions with access labels
       finalDescription = `${config.description}\n\nAccess: ${accessLabel}${showUpgrade ? ` (upgrade: ${upgradeUrl})` : ''}`;
       finalSchema = config.inputSchema ? applyParamDescriptions(config.inputSchema) : undefined;
     }
@@ -1385,21 +1582,17 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
       },
     };
 
-    // Wrap handler with error handling to ensure proper serialization
+    // Wrap handler with error handling
     const safeHandler = async (input: z.infer<T>, extra?: MessageExtraInfo) => {
       try {
-        // Gate PRO tools
         const proGated = await gateIfProTool(name);
         if (proGated) return proGated;
 
-        // Option A: Lazy evaluation for integration tools
-        // Even if tool was registered, check if integration is actually connected
         const integrationGated = await gateIfIntegrationTool(name);
         if (integrationGated) return integrationGated;
 
         return await handler(input, extra);
       } catch (error: any) {
-        // Convert error to a properly serializable format
         const errorMessage = error?.message || String(error);
         const errorDetails = error?.body || error?.details || null;
         const errorCode = error?.code || error?.status || 'UNKNOWN_ERROR';
@@ -1409,7 +1602,6 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
           String(errorMessage).toLowerCase().includes('plan limit reached');
         const upgradeHint = isPlanLimit ? `\nUpgrade: ${upgradeUrl}` : '';
 
-        // Return structured error response instead of throwing
         const errorPayload = {
           success: false,
           error: {
@@ -1426,12 +1618,78 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
         };
       }
     };
-    
-    server.registerTool(
+
+    serverRef.registerTool(
       name,
       annotatedConfig,
       wrapWithAutoContext(name, safeHandler)
     );
+  }
+
+  /**
+   * Enable a tool bundle dynamically (Strategy 5).
+   * Registers all deferred tools from the bundle and notifies clients.
+   */
+  function enableBundle(bundleName: string): { success: boolean; message: string; toolsEnabled: number } {
+    if (enabledBundles.has(bundleName)) {
+      return { success: true, message: `Bundle '${bundleName}' is already enabled.`, toolsEnabled: 0 };
+    }
+
+    const bundle = TOOL_BUNDLES[bundleName];
+    if (!bundle) {
+      return { success: false, message: `Unknown bundle '${bundleName}'. Available: ${Object.keys(TOOL_BUNDLES).join(', ')}`, toolsEnabled: 0 };
+    }
+
+    enabledBundles.add(bundleName);
+    let toolsEnabled = 0;
+
+    // Register all deferred tools from this bundle
+    for (const toolName of bundle) {
+      const deferred = deferredTools.get(toolName);
+      if (deferred) {
+        actuallyRegisterTool(deferred.name, deferred.config, deferred.handler);
+        deferredTools.delete(toolName);
+        toolsEnabled++;
+      }
+    }
+
+    // Notify clients that tool list has changed
+    try {
+      const lowLevelServer = serverRef as unknown as { sendToolsListChanged?: () => void };
+      lowLevelServer.sendToolsListChanged?.();
+    } catch {
+      // Client might not support this notification
+    }
+
+    console.error(`[ContextStream] Bundle '${bundleName}' enabled with ${toolsEnabled} tools.`);
+    return { success: true, message: `Enabled bundle '${bundleName}' with ${toolsEnabled} tools.`, toolsEnabled };
+  }
+
+  function registerTool<T extends z.ZodType>(
+    name: string,
+    config: { title: string; description: string; inputSchema: T },
+    handler: (input: z.infer<T>, extra?: MessageExtraInfo) => Promise<ToolTextResult>
+  ) {
+    // Check toolset allowlist first
+    if (toolAllowlist && !toolAllowlist.has(name)) {
+      return;
+    }
+
+    // Option B: Skip registration for integration tools when auto-hide is enabled
+    // and integrations are not connected. This reduces the tool registry size.
+    if (!shouldRegisterIntegrationTool(name)) {
+      return;
+    }
+
+    // Strategy 5: Progressive disclosure - defer tools not in enabled bundles
+    if (PROGRESSIVE_MODE && !isToolInEnabledBundles(name)) {
+      // Store for later registration when bundle is enabled
+      deferredTools.set(name, { name, config, handler });
+      return;
+    }
+
+    // Register the tool immediately
+    actuallyRegisterTool(name, config, handler);
   }
 
   function errorResult(text: string): ToolTextResult {
@@ -1510,6 +1768,68 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     async () => {
       const result = await client.me();
       return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+    }
+  );
+
+  // Strategy 5: Tool bundle management
+  registerTool(
+    'tools_enable_bundle',
+    {
+      title: 'Enable tool bundle',
+      description: `Enable a bundle of related tools dynamically. Only available when CONTEXTSTREAM_PROGRESSIVE_MODE=true.
+
+Available bundles:
+- session: Extended session management (~6 tools)
+- memory: Full memory CRUD operations (~16 tools)
+- search: Semantic, hybrid, and keyword search (~3 tools)
+- graph: Code graph analysis and dependencies (~9 tools)
+- workspace: Workspace management (~4 tools)
+- project: Project management and indexing (~10 tools)
+- reminders: Reminder management (~6 tools)
+- integrations: Slack and GitHub integrations (~21 tools)
+
+Example: Enable memory tools before using memory_create_event.`,
+      inputSchema: z.object({
+        bundle: z.enum(['session', 'memory', 'search', 'graph', 'workspace', 'project', 'reminders', 'integrations'])
+          .describe('Name of the bundle to enable'),
+        list_bundles: z.boolean().optional().describe('If true, list all available bundles and their status'),
+      }),
+    },
+    async (input) => {
+      // If just listing bundles, return bundle info
+      if (input.list_bundles) {
+        const bundles = getBundleInfo();
+        const result = {
+          progressive_mode: PROGRESSIVE_MODE,
+          bundles,
+          hint: PROGRESSIVE_MODE
+            ? 'Call tools_enable_bundle with a bundle name to enable additional tools.'
+            : 'Progressive mode is disabled. All tools from your toolset are already available.',
+        };
+        return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+      }
+
+      // If progressive mode is disabled, all tools are already available
+      if (!PROGRESSIVE_MODE) {
+        const result = {
+          success: true,
+          message: `Progressive mode is disabled. All tools from your toolset are already available. Bundle '${input.bundle}' tools are accessible.`,
+          progressive_mode: false,
+        };
+        return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+      }
+
+      // Enable the bundle
+      const result = enableBundle(input.bundle);
+      const response = {
+        ...result,
+        progressive_mode: true,
+        enabled_bundles: Array.from(enabledBundles),
+        hint: result.success && result.toolsEnabled > 0
+          ? 'New tools are now available. The client should refresh its tool list.'
+          : undefined,
+      };
+      return { content: [{ type: 'text' as const, text: formatContent(response) }], structuredContent: toStructured(response) };
     }
   );
 
@@ -2881,9 +3201,24 @@ Memory: events(crud) nodes(knowledge) search(find) decisions(choices)`,
     async (input) => {
       const format = (input.format || 'grouped') as CatalogFormat;
       const catalog = generateToolCatalog(format, input.category);
+
+      // Add bundle info when progressive mode is enabled
+      let bundleInfo = '';
+      if (PROGRESSIVE_MODE) {
+        const bundles = getBundleInfo();
+        const enabledList = bundles.filter(b => b.enabled).map(b => b.name).join(', ');
+        const availableList = bundles.filter(b => !b.enabled).map(b => `${b.name}(${b.size})`).join(', ');
+        bundleInfo = `\n\n[Progressive Mode]\nEnabled: ${enabledList}\nAvailable: ${availableList}\nUse tools_enable_bundle to unlock more tools.`;
+      }
+
       return {
-        content: [{ type: 'text' as const, text: catalog }],
-        structuredContent: { format, catalog },
+        content: [{ type: 'text' as const, text: catalog + bundleInfo }],
+        structuredContent: {
+          format,
+          catalog,
+          progressive_mode: PROGRESSIVE_MODE,
+          bundles: PROGRESSIVE_MODE ? getBundleInfo() : undefined,
+        },
       };
     }
   );
