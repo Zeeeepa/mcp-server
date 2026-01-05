@@ -301,6 +301,8 @@ type McpServerJson = {
   env: Record<string, string>;
 };
 
+const IS_WINDOWS = process.platform === 'win32';
+
 function buildContextStreamMcpServer(params: { apiUrl: string; apiKey: string; toolset?: Toolset }): McpServerJson {
   const env: Record<string, string> = {
     CONTEXTSTREAM_API_URL: params.apiUrl,
@@ -311,6 +313,14 @@ function buildContextStreamMcpServer(params: { apiUrl: string; apiKey: string; t
     env.CONTEXTSTREAM_PROGRESSIVE_MODE = 'true';
   }
   // consolidated is the default, no env var needed
+  // Windows requires cmd /c wrapper to execute npx
+  if (IS_WINDOWS) {
+    return {
+      command: 'cmd',
+      args: ['/c', 'npx', '-y', '@contextstream/mcp-server'],
+      env,
+    };
+  }
   return {
     command: 'npx',
     args: ['-y', '@contextstream/mcp-server'],
@@ -335,6 +345,15 @@ function buildContextStreamVsCodeServer(params: { apiUrl: string; apiKey: string
     env.CONTEXTSTREAM_PROGRESSIVE_MODE = 'true';
   }
   // consolidated is the default, no env var needed
+  // Windows requires cmd /c wrapper to execute npx
+  if (IS_WINDOWS) {
+    return {
+      type: 'stdio',
+      command: 'cmd',
+      args: ['/c', 'npx', '-y', '@contextstream/mcp-server'],
+      env,
+    };
+  }
   return {
     type: 'stdio',
     command: 'npx',
@@ -441,12 +460,15 @@ async function upsertCodexTomlConfig(filePath: string, params: { apiUrl: string;
 
   // v0.4.x: consolidated is default, router uses PROGRESSIVE_MODE
   const toolsetLine = params.toolset === 'router' ? `CONTEXTSTREAM_PROGRESSIVE_MODE = "true"\n` : '';
+  // Windows requires cmd /c wrapper to execute npx
+  const commandLine = IS_WINDOWS
+    ? `command = "cmd"\nargs = ["/c", "npx", "-y", "@contextstream/mcp-server"]\n`
+    : `command = "npx"\nargs = ["-y", "@contextstream/mcp-server"]\n`;
   const block =
     `\n\n# ContextStream MCP server\n` +
     `[mcp_servers.contextstream]\n` +
-    `command = "npx"\n` +
-    `args = ["-y", "@contextstream/mcp-server"]\n\n` +
-    `[mcp_servers.contextstream.env]\n` +
+    commandLine +
+    `\n[mcp_servers.contextstream.env]\n` +
     `CONTEXTSTREAM_API_URL = "${params.apiUrl}"\n` +
     `CONTEXTSTREAM_API_KEY = "${params.apiKey}"\n` +
     toolsetLine;
