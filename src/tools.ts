@@ -6778,3 +6778,43 @@ Use this to remove a reminder that is no longer relevant.`,
   // END CONSOLIDATED DOMAIN TOOLS
   // =============================================================================
 }
+
+/**
+ * Register minimal tools for limited mode (no credentials).
+ * This exposes only a setup help tool so users know how to configure the server.
+ */
+export function registerLimitedTools(server: McpServer): void {
+  server.registerTool(
+    'contextstream_setup',
+    {
+      title: 'ContextStream Setup Required',
+      description: 'ContextStream is not configured. Call this tool for setup instructions.',
+      inputSchema: { type: 'object' as const, properties: {} },
+    },
+    async () => {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `ContextStream: API key not configured.
+
+To set up (creates key + configures your editor):
+  npx -y @contextstream/mcp-server setup
+
+This will:
+- Start a 5-day Pro trial
+- Auto-configure your editor's MCP settings
+- Write rules files for better AI assistance
+
+Preview first:
+  npx -y @contextstream/mcp-server setup --dry-run
+
+After setup, restart your editor to enable all ContextStream tools.`,
+          },
+        ],
+      };
+    }
+  );
+
+  console.error('[ContextStream] Limited mode: Registered setup helper tool only.');
+}

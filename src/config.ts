@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
+const DEFAULT_API_URL = 'https://api.contextstream.io';
+
 const configSchema = z.object({
-  apiUrl: z.string().url(),
+  apiUrl: z.string().url().default(DEFAULT_API_URL),
   apiKey: z.string().min(1).optional(),
   jwt: z.string().min(1).optional(),
   defaultWorkspaceId: z.string().uuid().optional(),
@@ -11,6 +13,15 @@ const configSchema = z.object({
 });
 
 export type Config = z.infer<typeof configSchema>;
+
+const MISSING_CREDENTIALS_ERROR = 'Set CONTEXTSTREAM_API_KEY or CONTEXTSTREAM_JWT for authentication (or CONTEXTSTREAM_ALLOW_HEADER_AUTH=true for header-based auth).';
+
+export function isMissingCredentialsError(err: unknown): boolean {
+  if (err instanceof Error) {
+    return err.message === MISSING_CREDENTIALS_ERROR;
+  }
+  return false;
+}
 
 export function loadConfig(): Config {
   const allowHeaderAuth =
@@ -35,7 +46,7 @@ export function loadConfig(): Config {
   }
 
   if (!parsed.data.apiKey && !parsed.data.jwt && !parsed.data.allowHeaderAuth) {
-    throw new Error('Set CONTEXTSTREAM_API_KEY or CONTEXTSTREAM_JWT for authentication (or CONTEXTSTREAM_ALLOW_HEADER_AUTH=true for header-based auth).');
+    throw new Error(MISSING_CREDENTIALS_ERROR);
   }
 
   return parsed.data;

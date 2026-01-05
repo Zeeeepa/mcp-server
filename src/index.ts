@@ -1,8 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { loadConfig } from './config.js';
+import { loadConfig, isMissingCredentialsError } from './config.js';
 import { ContextStreamClient } from './client.js';
-import { registerTools, setupClientDetection } from './tools.js';
+import { registerTools, setupClientDetection, registerLimitedTools } from './tools.js';
 import { registerResources } from './resources.js';
 import { registerPrompts } from './prompts.js';
 import { SessionManager } from './session-manager.js';
@@ -12,6 +12,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { VERSION, checkForUpdates } from './version.js';
 import { runSetupWizard } from './setup.js';
+import { readSavedCredentials } from './credentials.js';
 
 const ENABLE_PROMPTS = (process.env.CONTEXTSTREAM_ENABLE_PROMPTS || 'true').toLowerCase() !== 'false';
 
@@ -108,6 +109,27 @@ Notes:
   - The server communicates over stdio; logs are written to stderr.`);
 }
 
+/**
+ * Run the MCP server in limited mode (no credentials).
+ * Only exposes a setup helper tool so users know how to configure.
+ */
+async function runLimitedModeServer(): Promise<void> {
+  const server = new McpServer({
+    name: 'contextstream-mcp',
+    version: VERSION,
+  });
+
+  registerLimitedTools(server);
+
+  console.error(`ContextStream MCP server v${VERSION} (limited mode)`);
+  console.error('Run "npx -y @contextstream/mcp-server setup" to enable all tools.');
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+
+  console.error('ContextStream MCP server connected (limited mode - setup required)');
+}
+
 async function main() {
   const args = process.argv.slice(2);
 
@@ -138,7 +160,28 @@ async function main() {
     return;
   }
 
-  const config = loadConfig();
+  // Try to load saved credentials if env vars not set
+  if (!process.env.CONTEXTSTREAM_API_KEY && !process.env.CONTEXTSTREAM_JWT) {
+    const saved = await readSavedCredentials();
+    if (saved) {
+      process.env.CONTEXTSTREAM_API_URL = saved.api_url;
+      process.env.CONTEXTSTREAM_API_KEY = saved.api_key;
+    }
+  }
+
+  // Try to load config - may fail if still no credentials
+  let config;
+  try {
+    config = loadConfig();
+  } catch (err) {
+    if (isMissingCredentialsError(err)) {
+      // Run limited mode server instead of exiting with error
+      await runLimitedModeServer();
+      return;
+    }
+    throw err;
+  }
+
   const client = new ContextStreamClient(config);
 
   const server = new McpServer({

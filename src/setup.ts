@@ -1184,6 +1184,14 @@ export async function runSetupWizard(args: string[]): Promise<void> {
     if (toolset === 'router') {
       console.log('- Router mode uses 2 meta-tools (session_init + context_smart) for ultra-minimal token usage.');
     }
+
+    console.log('');
+    console.log("You're set up! Now try these prompts in your AI tool:");
+    console.log('  1) "session summary"');
+    console.log("  2) \"remember we're using PostgreSQL\"");
+    console.log('  3) "what did we decide about auth?"');
+    console.log('');
+    console.log('More at: https://contextstream.io/docs/mcp');
   } finally {
     rl.close();
   }
