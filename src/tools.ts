@@ -835,6 +835,132 @@ const deferredTools = new Map<string, DeferredToolConfig>();
 // END Strategy 5
 // =============================================================================
 
+// =============================================================================
+// Strategy 6: Router Tool Pattern
+// =============================================================================
+// Environment variable to control router mode
+// CONTEXTSTREAM_ROUTER_MODE=true | false (default: false)
+// When enabled, instead of registering 50+ individual tools, we register only
+// 2 meta-tools: `contextstream` (dispatcher) and `contextstream_help` (schema lookup).
+// This reduces the tool registry from ~50k+ tokens to ~2-3k tokens.
+const ROUTER_MODE = process.env.CONTEXTSTREAM_ROUTER_MODE === 'true';
+
+// Operations registry - stores all tool configs when router mode is enabled
+type OperationConfig = {
+  name: string;
+  title: string;
+  description: string;
+  inputSchema: z.ZodType;
+  handler: (input: any, extra?: MessageExtraInfo) => Promise<ToolTextResult>;
+  category: string;
+};
+const operationsRegistry = new Map<string, OperationConfig>();
+
+// Category mapping for operations
+function inferOperationCategory(name: string): string {
+  if (name.startsWith('session_') || name.startsWith('context_')) return 'Session';
+  if (name.startsWith('memory_')) return 'Memory';
+  if (name.startsWith('search_')) return 'Search';
+  if (name.startsWith('graph_')) return 'Graph';
+  if (name.startsWith('workspace')) return 'Workspace';
+  if (name.startsWith('project')) return 'Project';
+  if (name.startsWith('reminder')) return 'Reminders';
+  if (name.startsWith('slack_') || name.startsWith('github_') || name.startsWith('integration')) return 'Integrations';
+  if (name.startsWith('ai_')) return 'AI';
+  if (name === 'auth_me' || name === 'mcp_server_version' || name === 'generate_editor_rules') return 'Utility';
+  if (name === 'tools_enable_bundle' || name === 'contextstream' || name === 'contextstream_help') return 'Meta';
+  return 'Other';
+}
+
+// Get compact operation list for help
+function getOperationCatalog(category?: string): string {
+  const ops: Record<string, string[]> = {};
+
+  for (const [name, config] of operationsRegistry) {
+    const cat = config.category;
+    if (category && cat.toLowerCase() !== category.toLowerCase()) continue;
+    if (!ops[cat]) ops[cat] = [];
+    ops[cat].push(name);
+  }
+
+  const lines: string[] = [];
+  for (const [cat, names] of Object.entries(ops).sort()) {
+    lines.push(`${cat}: ${names.join(', ')}`);
+  }
+
+  return lines.join('\n');
+}
+
+// Get operation schema for help
+type OperationSchemaInfo = {
+  name: string;
+  title: string;
+  description: string;
+  category: string;
+  schema: { type: string; properties?: Record<string, any>; required?: string[] };
+};
+
+function getOperationSchema(name: string): OperationSchemaInfo | null {
+  const op = operationsRegistry.get(name);
+  if (!op) return null;
+
+  // Convert Zod schema to JSON schema (simplified)
+  const zodSchema = op.inputSchema;
+  try {
+    // Use zod's built-in JSON schema conversion if available
+    const shape = (zodSchema as any)?._def?.shape?.() || (zodSchema as any)?.shape || {};
+    const properties: Record<string, any> = {};
+    const required: string[] = [];
+
+    for (const [key, field] of Object.entries(shape)) {
+      const f = field as any;
+      const isOptional = f?._def?.typeName === 'ZodOptional' || f?.isOptional?.();
+      const innerType = isOptional ? f?._def?.innerType : f;
+      const typeName = innerType?._def?.typeName || 'unknown';
+      const description = f?._def?.description || innerType?._def?.description;
+
+      let type = 'string';
+      if (typeName === 'ZodNumber') type = 'number';
+      else if (typeName === 'ZodBoolean') type = 'boolean';
+      else if (typeName === 'ZodArray') type = 'array';
+      else if (typeName === 'ZodObject') type = 'object';
+      else if (typeName === 'ZodEnum') type = 'enum';
+
+      properties[key] = { type };
+      if (description) properties[key].description = description;
+      if (typeName === 'ZodEnum') {
+        properties[key].enum = innerType?._def?.values;
+      }
+
+      if (!isOptional) required.push(key);
+    }
+
+    return {
+      name: op.name,
+      title: op.title,
+      description: op.description,
+      category: op.category,
+      schema: {
+        type: 'object',
+        properties,
+        required: required.length > 0 ? required : undefined,
+      },
+    };
+  } catch {
+    return {
+      name: op.name,
+      title: op.title,
+      description: op.description,
+      category: op.category,
+      schema: { type: 'object' },
+    };
+  }
+}
+
+// =============================================================================
+// END Strategy 6
+// =============================================================================
+
 const TOOLSET_ALIASES: Record<string, Set<string> | null> = {
   // Light mode - minimal, fastest
   light: LIGHT_TOOLSET,
@@ -1110,6 +1236,12 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     const coreBundle = TOOL_BUNDLES.core;
     console.error(`[ContextStream] Progressive mode: ENABLED (starting with ${coreBundle.size} core tools)`);
     console.error('[ContextStream] Use tools_enable_bundle to unlock additional tool bundles dynamically.');
+  }
+
+  // Log router mode status (Strategy 6)
+  if (ROUTER_MODE) {
+    console.error('[ContextStream] Router mode: ENABLED (all operations accessed via contextstream/contextstream_help)');
+    console.error('[ContextStream] Only 2 tools registered. Use contextstream_help to see available operations.');
   }
 
   // Store server reference for deferred tool registration
@@ -1665,6 +1797,9 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     return { success: true, message: `Enabled bundle '${bundleName}' with ${toolsEnabled} tools.`, toolsEnabled };
   }
 
+  // Meta-tools that should always be registered directly (not routed)
+  const ROUTER_DIRECT_TOOLS = new Set(['contextstream', 'contextstream_help']);
+
   function registerTool<T extends z.ZodType>(
     name: string,
     config: { title: string; description: string; inputSchema: T },
@@ -1672,12 +1807,37 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
   ) {
     // Check toolset allowlist first
     if (toolAllowlist && !toolAllowlist.has(name)) {
+      // In router mode, still store in registry even if not in allowlist
+      // (the router can access all operations)
+      if (ROUTER_MODE && !ROUTER_DIRECT_TOOLS.has(name)) {
+        operationsRegistry.set(name, {
+          name,
+          title: config.title,
+          description: config.description,
+          inputSchema: config.inputSchema,
+          handler,
+          category: inferOperationCategory(name),
+        });
+      }
       return;
     }
 
     // Option B: Skip registration for integration tools when auto-hide is enabled
     // and integrations are not connected. This reduces the tool registry size.
     if (!shouldRegisterIntegrationTool(name)) {
+      return;
+    }
+
+    // Strategy 6: Router mode - store in operations registry instead of registering
+    if (ROUTER_MODE && !ROUTER_DIRECT_TOOLS.has(name)) {
+      operationsRegistry.set(name, {
+        name,
+        title: config.title,
+        description: config.description,
+        inputSchema: config.inputSchema,
+        handler,
+        category: inferOperationCategory(name),
+      });
       return;
     }
 
@@ -1832,6 +1992,141 @@ Example: Enable memory tools before using memory_create_event.`,
       return { content: [{ type: 'text' as const, text: formatContent(response) }], structuredContent: toStructured(response) };
     }
   );
+
+  // Strategy 6: Router meta-tools (only registered when router mode is enabled)
+  if (ROUTER_MODE) {
+    // Main dispatcher tool
+    serverRef.registerTool(
+      'contextstream',
+      {
+        title: 'ContextStream Operation',
+        description: `Execute any ContextStream operation. Use contextstream_help to see available operations.
+
+Example: contextstream({ op: "session_init", args: { folder_path: "/path/to/project" } })
+
+This single tool replaces 50+ individual tools, dramatically reducing token overhead.
+All ContextStream functionality is accessible through this dispatcher.`,
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            op: { type: 'string', description: 'Operation name (e.g., session_init, memory_create_event)' },
+            args: { type: 'object', description: 'Operation arguments (varies by operation)' },
+          },
+          required: ['op'],
+        },
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
+      async (input: { op: string; args?: Record<string, unknown> }) => {
+        const opName = input.op;
+        const operation = operationsRegistry.get(opName);
+
+        if (!operation) {
+          const available = getOperationCatalog();
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Unknown operation: ${opName}\n\nAvailable operations:\n${available}\n\nUse contextstream_help({ op: "operation_name" }) for details.`,
+            }],
+            isError: true,
+          };
+        }
+
+        // Validate args against schema
+        const args = input.args || {};
+        const parsed = operation.inputSchema.safeParse(args);
+        if (!parsed.success) {
+          const schema = getOperationSchema(opName);
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Invalid arguments for ${opName}: ${parsed.error.message}\n\nExpected schema:\n${JSON.stringify(schema?.schema || {}, null, 2)}`,
+            }],
+            isError: true,
+          };
+        }
+
+        // Execute the operation
+        try {
+          return await operation.handler(parsed.data);
+        } catch (error: any) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Error executing ${opName}: ${error?.message || String(error)}`,
+            }],
+            isError: true,
+          };
+        }
+      }
+    );
+
+    // Help/schema lookup tool
+    serverRef.registerTool(
+      'contextstream_help',
+      {
+        title: 'ContextStream Help',
+        description: `Get help on available ContextStream operations or schema for a specific operation.
+
+Examples:
+- contextstream_help({}) - List all operations by category
+- contextstream_help({ op: "session_init" }) - Get schema for session_init
+- contextstream_help({ category: "Memory" }) - List memory operations only`,
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            op: { type: 'string', description: 'Operation name to get schema for' },
+            category: { type: 'string', description: 'Category to filter (Session, Memory, Search, Graph, etc.)' },
+          },
+        },
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
+      async (input: { op?: string; category?: string }) => {
+        // If specific operation requested, return its schema
+        if (input.op) {
+          const schema = getOperationSchema(input.op);
+          if (!schema) {
+            return {
+              content: [{
+                type: 'text' as const,
+                text: `Unknown operation: ${input.op}\n\nUse contextstream_help({}) to see available operations.`,
+              }],
+              isError: true,
+            };
+          }
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(schema, null, 2) }],
+            structuredContent: schema as StructuredContent,
+          };
+        }
+
+        // Return operation catalog
+        const catalog = getOperationCatalog(input.category);
+        const result = {
+          router_mode: true,
+          total_operations: operationsRegistry.size,
+          categories: catalog,
+          usage: 'Call contextstream({ op: "operation_name", args: {...} }) to execute an operation.',
+          hint: 'Use contextstream_help({ op: "operation_name" }) to see the schema for a specific operation.',
+        };
+        return {
+          content: [{ type: 'text' as const, text: formatContent(result) }],
+          structuredContent: toStructured(result),
+        };
+      }
+    );
+
+    console.error(`[ContextStream] Router mode: Registered 2 meta-tools, ${operationsRegistry.size} operations available via dispatcher.`);
+  }
 
   // Workspaces
   registerTool(

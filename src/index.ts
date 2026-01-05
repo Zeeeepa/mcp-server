@@ -82,6 +82,7 @@ Environment variables:
   CONTEXTSTREAM_AUTO_HIDE_INTEGRATIONS  Auto-hide Slack/GitHub tools when not connected (default: true)
   CONTEXTSTREAM_SCHEMA_MODE   Schema verbosity: compact|full (default: full, compact reduces tokens)
   CONTEXTSTREAM_PROGRESSIVE_MODE  Progressive disclosure: true|false (default: false, starts with ~13 core tools)
+  CONTEXTSTREAM_ROUTER_MODE   Router pattern: true|false (default: false, exposes only 2 meta-tools)
   CONTEXTSTREAM_PRO_TOOLS     Optional comma-separated PRO tool names (default: AI tools)
   CONTEXTSTREAM_UPGRADE_URL   Optional upgrade URL shown for PRO tools on Free plan
   CONTEXTSTREAM_ENABLE_PROMPTS Enable MCP prompts list (default: true)
