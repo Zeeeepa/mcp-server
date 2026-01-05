@@ -1131,13 +1131,13 @@ function estimateGraphIngestMinutes(stats: unknown): { min: number; max: number;
   };
 }
 
-function normalizeLessonField(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+function normalizeLessonField(value: string | undefined | null) {
+  return (value || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 function buildLessonSignature(input: {
   title: string;
-  category: string;
+  category?: string;
   trigger: string;
   impact: string;
   prevention: string;
