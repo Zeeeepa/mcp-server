@@ -1820,7 +1820,7 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
    * Enable a tool bundle dynamically (Strategy 5).
    * Registers all deferred tools from the bundle and notifies clients.
    */
-  function enableBundle(bundleName: string): { success: boolean; message: string; toolsEnabled: number } {
+  function enableBundle(bundleName: string): { success: boolean; message: string; toolsEnabled: number; hint?: string } {
     if (enabledBundles.has(bundleName)) {
       return { success: true, message: `Bundle '${bundleName}' is already enabled.`, toolsEnabled: 0 };
     }
@@ -1852,7 +1852,12 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     }
 
     console.error(`[ContextStream] Bundle '${bundleName}' enabled with ${toolsEnabled} tools.`);
-    return { success: true, message: `Enabled bundle '${bundleName}' with ${toolsEnabled} tools.`, toolsEnabled };
+    return {
+      success: true,
+      message: `Enabled bundle '${bundleName}' with ${toolsEnabled} tools.`,
+      toolsEnabled,
+      hint: "If your client doesn't auto-refresh tools, restart the MCP connection to see new tools.",
+    };
   }
 
   // Meta-tools that should always be registered directly (not routed)
@@ -3469,6 +3474,15 @@ This does semantic search on the first message. You only need context_smart on s
           console.error('[ContextStream] Failed to check integration status in session_init:', error);
         }
       }
+
+      // Add mode/status block for AI visibility (v0.4.x)
+      (result as any).modes = {
+        consolidated: CONSOLIDATED_MODE,
+        progressive: PROGRESSIVE_MODE,
+        router: ROUTER_MODE,
+        auto_hide_integrations: AUTO_HIDE_INTEGRATIONS,
+        bundles: PROGRESSIVE_MODE ? getBundleInfo() : undefined,
+      };
 
       const status = typeof result.status === 'string' ? (result.status as string) : '';
       const workspaceWarning = typeof (result as any).workspace_warning === 'string'
