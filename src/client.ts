@@ -1593,7 +1593,7 @@ export class ContextStreamClient {
     workspace_id?: string;
     project_id?: string;
     session_id?: string;
-    event_type: 'conversation' | 'decision' | 'insight' | 'preference' | 'task' | 'bug' | 'feature' | 'correction' | 'lesson' | 'warning' | 'frustration';
+    event_type: 'conversation' | 'decision' | 'insight' | 'preference' | 'task' | 'bug' | 'feature' | 'plan' | 'correction' | 'lesson' | 'warning' | 'frustration';
     title: string;
     content: string;
     tags?: string[];
@@ -1611,8 +1611,12 @@ export class ContextStreamClient {
       case 'conversation':
         apiEventType = 'chat';
         break;
+      // Plans & Tasks feature - use dedicated event types
       case 'task':
-        apiEventType = 'task_created';
+        apiEventType = 'task';
+        break;
+      case 'plan':
+        apiEventType = 'plan';
         break;
       case 'bug':
       case 'feature':
