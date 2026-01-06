@@ -1982,6 +1982,40 @@ export function registerTools(server: McpServer, client: ContextStreamClient, se
     return { ok: true, resolvedPath };
   }
 
+  function startBackgroundIngest(
+    projectId: string,
+    resolvedPath: string,
+    ingestOptions: { write_to_disk?: boolean; overwrite?: boolean },
+    options: { preflight?: boolean } = {}
+  ): void {
+    (async () => {
+      try {
+        if (options.preflight) {
+          const fileCheck = await countIndexableFiles(resolvedPath, { maxFiles: 1 });
+          if (fileCheck.count === 0) {
+            console.error(`[ContextStream] No indexable files found in ${resolvedPath}. Skipping ingest.`);
+            return;
+          }
+        }
+
+        let totalIndexed = 0;
+        let batchCount = 0;
+
+        console.error(`[ContextStream] Starting background ingestion for project ${projectId} from ${resolvedPath}`);
+
+        for await (const batch of readAllFilesInBatches(resolvedPath, { batchSize: 50 })) {
+          const result = await client.ingestFiles(projectId, batch, ingestOptions) as { data?: { files_indexed: number } };
+          totalIndexed += result.data?.files_indexed ?? batch.length;
+          batchCount++;
+        }
+
+        console.error(`[ContextStream] Completed background ingestion: ${totalIndexed} files in ${batchCount} batches`);
+      } catch (error) {
+        console.error(`[ContextStream] Ingestion failed:`, error);
+      }
+    })();
+  }
+
   // Auth
   registerTool(
     'mcp_server_version',
@@ -3017,7 +3051,8 @@ Access: Free`,
       title: 'Ingest local files',
       description: `Read ALL files from a local directory and ingest them for indexing.
 This indexes your entire project by reading files in batches.
-Automatically detects code files and skips ignored directories like node_modules, target, dist, etc.`,
+Automatically detects code files and skips ignored directories like node_modules, target, dist, etc.
+Runs in the background and returns immediately; use 'projects_index_status' to monitor progress.`,
       inputSchema: z.object({
         project_id: z.string().uuid().optional().describe('Project to ingest files into (defaults to current session project)'),
         path: z.string().describe('Local directory path to read files from'),
@@ -3036,41 +3071,13 @@ Automatically detects code files and skips ignored directories like node_modules
         return errorResult(pathCheck.error);
       }
 
-      // Quick check: does directory contain any indexable files?
-      const fileCheck = await countIndexableFiles(pathCheck.resolvedPath, { maxFiles: 1 });
-      if (fileCheck.count === 0) {
-        return errorResult(
-          `Error: no indexable files found in directory: ${input.path}. ` +
-          `The directory may be empty or contain only ignored files/directories. ` +
-          `Supported file types include: .ts, .js, .py, .rs, .go, .java, .md, .json, etc.`
-        );
-      }
-
       // Capture ingest options for passing to API
       const ingestOptions = {
         ...(input.write_to_disk !== undefined && { write_to_disk: input.write_to_disk }),
         ...(input.overwrite !== undefined && { overwrite: input.overwrite }),
       };
 
-      // Start ingestion in background to avoid blocking the agent
-      (async () => {
-        try {
-          let totalIndexed = 0;
-          let batchCount = 0;
-
-          console.error(`[ContextStream] Starting background ingestion for project ${projectId} from ${pathCheck.resolvedPath}`);
-
-          for await (const batch of readAllFilesInBatches(pathCheck.resolvedPath, { batchSize: 50 })) {
-            const result = await client.ingestFiles(projectId, batch, ingestOptions) as { data?: { files_indexed: number } };
-            totalIndexed += result.data?.files_indexed ?? batch.length;
-            batchCount++;
-          }
-
-          console.error(`[ContextStream] Completed background ingestion: ${totalIndexed} files in ${batchCount} batches`);
-        } catch (error) {
-          console.error(`[ContextStream] Ingestion failed:`, error);
-        }
-      })();
+      startBackgroundIngest(projectId, pathCheck.resolvedPath, ingestOptions, { preflight: true });
 
       const summary = {
         status: 'started',
@@ -6358,7 +6365,7 @@ Use this to remove a reminder that is no longer relevant.`,
     // -------------------------------------------------------------------------
     // project - Consolidates project management tools
     // -------------------------------------------------------------------------
-    registerTool(
+  registerTool(
       'project',
       {
         title: 'Project',
@@ -6483,24 +6490,27 @@ Use this to remove a reminder that is no longer relevant.`,
             if (!validPath.ok) {
               return errorResult(validPath.error);
             }
-            let totalFiles = 0;
-            let batches = 0;
-            for await (const batch of readAllFilesInBatches(validPath.resolvedPath, { batchSize: 50 })) {
-              if (batch.length === 0) continue;
-              await client.ingestFiles(projectId, batch, {
-                overwrite: input.overwrite,
-                write_to_disk: input.write_to_disk,
-              });
-              totalFiles += batch.length;
-              batches += 1;
-            }
-            const result = {
-              project_id: projectId,
-              files_ingested: totalFiles,
-              batches,
-              path: validPath.resolvedPath,
+            const ingestOptions = {
+              ...(input.write_to_disk !== undefined && { write_to_disk: input.write_to_disk }),
+              ...(input.overwrite !== undefined && { overwrite: input.overwrite }),
             };
-            return { content: [{ type: 'text' as const, text: formatContent(result) }], structuredContent: toStructured(result) };
+            startBackgroundIngest(projectId, validPath.resolvedPath, ingestOptions);
+            const result = {
+              status: 'started',
+              message: 'Ingestion running in background',
+              project_id: projectId,
+              path: validPath.resolvedPath,
+              ...(input.write_to_disk !== undefined && { write_to_disk: input.write_to_disk }),
+              ...(input.overwrite !== undefined && { overwrite: input.overwrite }),
+              note: "Use 'project' with action 'index_status' to monitor progress."
+            };
+            return {
+              content: [{
+                type: 'text' as const,
+                text: `Ingestion started in background for directory: ${validPath.resolvedPath}. Use 'project' with action 'index_status' to monitor progress.`
+              }],
+              structuredContent: toStructured(result)
+            };
           }
 
           default:
