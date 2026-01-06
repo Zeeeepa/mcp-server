@@ -187,6 +187,7 @@ To manage existing plans/tasks:
 - Get plan with tasks: \`session(action="get_plan", plan_id="<uuid>", include_tasks=true)\`
 - List tasks: \`memory(action="list_tasks", plan_id="<uuid>")\` or \`memory(action="list_tasks")\` for all
 - Update task status: \`memory(action="update_task", task_id="<uuid>", task_status="pending|in_progress|completed|blocked")\`
+- Link task to plan: \`memory(action="update_task", task_id="<uuid>", plan_id="<plan_uuid>")\`
 - Delete: \`memory(action="delete_task", task_id="<uuid>")\` or \`memory(action="delete_event", event_id="<plan_uuid>")\`
 
 ---
@@ -270,6 +271,7 @@ To manage existing plans/tasks:
 - Get plan with tasks: \`session(action="get_plan", plan_id="<uuid>", include_tasks=true)\`
 - List tasks: \`memory(action="list_tasks", plan_id="<uuid>")\` or \`memory(action="list_tasks")\` for all
 - Update task status: \`memory(action="update_task", task_id="<uuid>", task_status="pending|in_progress|completed|blocked")\`
+- Link task to plan: \`memory(action="update_task", task_id="<uuid>", plan_id="<plan_uuid>")\`
 - Delete: \`memory(action="delete_task", task_id="<uuid>")\` or \`memory(action="delete_event", event_id="<plan_uuid>")\`
 
 Full docs: https://contextstream.io/docs/mcp/tools
