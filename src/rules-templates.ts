@@ -65,7 +65,7 @@ Rules Version: ${RULES_VERSION}
 
 **NO EXCEPTIONS.** Do not skip even if you think you have enough context.
 
-**Context Pack (Pro+):** If enabled, use \`context_smart(..., mode="pack", distill=true)\` for code/file queries. If unavailable, omit \`mode\` and use standard \`context_smart\`.
+**Context Pack (Pro+):** If enabled, use \`context_smart(..., mode="pack", distill=true)\` for code/file queries. If unavailable or disabled, omit \`mode\` and proceed with standard \`context_smart\` (the API will fall back).
 
 **Tool naming:** Use the exact tool names exposed by your MCP client. Claude Code typically uses \`mcp__<server>__<tool>\` where \`<server>\` matches your MCP config (often \`contextstream\`). If a tool call fails with "No such tool available", refresh rules and match the tool list.
 
@@ -159,9 +159,9 @@ Only after this preflight, proceed with search/analysis below.
 2. \`search(mode="hybrid", query="...")\` or \`search(mode="keyword", query="<filename>")\`
 3. \`project(action="files")\` - file tree/list (only when needed)
 4. \`graph(action="dependencies", ...)\` - code structure
-5. Local repo scans (rg/ls/find) - only if ContextStream returns no results or is unavailable
+5. Local repo scans (rg/ls/find) - only if ContextStream returns no results, errors, or the user explicitly asks
 
-Use ContextStream results directly; only open files if you need exact code.
+If ContextStream returns results, stop and use them. Do NOT use local Search/Explore/Read unless you need exact code edits.
 
 **Code Analysis:**
 - Dependencies: \`graph(action="dependencies", file_path="...")\`
@@ -254,7 +254,7 @@ Rules Version: ${RULES_VERSION}
 | **Before risky work** | \`session(action="get_lessons", query="<topic>")\` |
 | **On user frustration** | \`session(action="capture_lesson", title="...", trigger="...", impact="...", prevention="...")\` |
 
-**Context Pack (Pro+):** If enabled, use \`context_smart(..., mode="pack", distill=true)\` for code/file queries. If unavailable, omit \`mode\`.
+**Context Pack (Pro+):** If enabled, use \`context_smart(..., mode="pack", distill=true)\` for code/file queries. If unavailable or disabled, omit \`mode\` and proceed with standard \`context_smart\` (the API will fall back).
 
 **Tool naming:** Use the exact tool names exposed by your MCP client. Claude Code typically uses \`mcp__<server>__<tool>\` where \`<server>\` matches your MCP config (often \`contextstream\`). If a tool call fails with "No such tool available", refresh rules and match the tool list.
 
@@ -278,6 +278,7 @@ Rules Version: ${RULES_VERSION}
 - **Before searching files/code**: Check \`project(action="index_status")\`; if missing/stale run \`project(action="ingest_local", path="<cwd>")\` or \`project(action="index")\`, and use \`graph(action="ingest")\` if needed
 - **For discovery**: Use \`session(action="smart_search")\` or \`search(mode="hybrid")\` before any local repo scans
 - **For file/function/config lookups**: Use \`search\`/\`graph\` first; only fall back to rg/ls/find if ContextStream returns no results
+- **If ContextStream returns results**: Do NOT use local Search/Explore/Read; only open specific files when needed for exact edits
 - **For code analysis**: Use \`graph(action="dependencies")\` or \`graph(action="impact")\` for call/dependency analysis
 - **On [RULES_NOTICE]**: Use \`generate_editor_rules(folder_path="<cwd>")\` to update rules
 - **After completing work**: Always capture decisions/insights with \`session(action="capture")\`
