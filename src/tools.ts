@@ -54,6 +54,7 @@ const DEFAULT_PARAM_DESCRIPTIONS: Record<string, string> = {
   recurrence: 'Recurrence pattern (daily, weekly, monthly).',
   keywords: 'Keywords for matching.',
   overwrite: 'Allow overwriting existing files on disk.',
+  overwrite_existing: 'Allow overwriting existing rule files (ContextStream block only).',
   write_to_disk: 'Write ingested files to disk before indexing.',
   await_indexing: 'Wait for indexing to finish before returning.',
   auto_index: 'Automatically index on creation.',
@@ -308,6 +309,19 @@ const LEGACY_CONTEXTSTREAM_ALLOWED_HEADINGS = [
   'plans & tasks',
   'complete action reference',
 ];
+const CONTEXTSTREAM_PREAMBLE_PATTERNS: RegExp[] = [
+  /^#\s+workspace:/i,
+  /^#\s+project:/i,
+  /^#\s+workspace id:/i,
+  /^#\s+codex cli instructions$/i,
+  /^#\s+claude code instructions$/i,
+  /^#\s+cursor rules$/i,
+  /^#\s+windsurf rules$/i,
+  /^#\s+cline rules$/i,
+  /^#\s+kilo code rules$/i,
+  /^#\s+roo code rules$/i,
+  /^#\s+aider configuration$/i,
+];
 
 function wrapWithMarkers(content: string): string {
   return `${CONTEXTSTREAM_START_MARKER}\n${content.trim()}\n${CONTEXTSTREAM_END_MARKER}`;
@@ -331,6 +345,110 @@ function isLegacyContextStreamRules(content: string): boolean {
   return hasHeading;
 }
 
+function isContextStreamPreamble(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  return CONTEXTSTREAM_PREAMBLE_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
+function findContextStreamHeading(lines: string[]): { index: number; level: number } | null {
+  const headingRegex = /^(#{1,6})\s+(.+)$/;
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = headingRegex.exec(lines[i]);
+    if (!match) continue;
+    if (match[2].toLowerCase().includes('contextstream')) {
+      return { index: i, level: match[1].length };
+    }
+  }
+  return null;
+}
+
+function findSectionEnd(lines: string[], startLine: number, level: number): number {
+  const headingRegex = /^(#{1,6})\s+(.+)$/;
+  for (let i = startLine + 1; i < lines.length; i += 1) {
+    const match = headingRegex.exec(lines[i]);
+    if (!match) continue;
+    if (match[1].length <= level) return i;
+  }
+  return lines.length;
+}
+
+function extractContextStreamBlock(content: string): string {
+  const lines = content.split(/\r?\n/);
+  const heading = findContextStreamHeading(lines);
+  if (!heading) return content.trim();
+  const endLine = findSectionEnd(lines, heading.index, heading.level);
+  return lines.slice(heading.index, endLine).join('\n').trim();
+}
+
+function findLegacyContextStreamSection(content: string): { startLine: number; endLine: number; contextLine: number } | null {
+  const lines = content.split(/\r?\n/);
+  const heading = findContextStreamHeading(lines);
+  if (!heading) return null;
+
+  let startLine = heading.index;
+  for (let i = heading.index - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (!line.trim()) {
+      startLine = i;
+      continue;
+    }
+    if (isContextStreamPreamble(line)) {
+      startLine = i;
+      continue;
+    }
+    break;
+  }
+
+  const endLine = findSectionEnd(lines, heading.index, heading.level);
+  return { startLine, endLine, contextLine: heading.index };
+}
+
+function blockHasPreamble(block: string): boolean {
+  const lines = block.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (isContextStreamPreamble(trimmed)) return true;
+    if (/^#{1,6}\s+/.test(trimmed)) return false;
+  }
+  return false;
+}
+
+function replaceContextStreamBlock(existing: string, content: string): { content: string; status: 'updated' | 'appended' } {
+  const fullWrapped = wrapWithMarkers(content);
+  const blockWrapped = wrapWithMarkers(extractContextStreamBlock(content));
+
+  const startIdx = existing.indexOf(CONTEXTSTREAM_START_MARKER);
+  const endIdx = existing.indexOf(CONTEXTSTREAM_END_MARKER);
+
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    const existingBlock = existing.slice(startIdx + CONTEXTSTREAM_START_MARKER.length, endIdx);
+    const replacement = blockHasPreamble(existingBlock) ? fullWrapped : blockWrapped;
+    const before = existing.substring(0, startIdx).trimEnd();
+    const after = existing.substring(endIdx + CONTEXTSTREAM_END_MARKER.length).trimStart();
+    const merged = [before, replacement, after].filter((part) => part.length > 0).join('\n\n');
+    return { content: merged.trim() + '\n', status: 'updated' };
+  }
+
+  const legacy = findLegacyContextStreamSection(existing);
+  if (legacy) {
+    const lines = existing.split(/\r?\n/);
+    const before = lines.slice(0, legacy.startLine).join('\n').trimEnd();
+    const after = lines.slice(legacy.endLine).join('\n').trimStart();
+    const replacement = legacy.startLine < legacy.contextLine ? fullWrapped : blockWrapped;
+    const merged = [before, replacement, after].filter((part) => part.length > 0).join('\n\n');
+    return { content: merged.trim() + '\n', status: 'updated' };
+  }
+
+  if (isLegacyContextStreamRules(existing)) {
+    return { content: fullWrapped + '\n', status: 'updated' };
+  }
+
+  const appended = existing.trimEnd() + '\n\n' + blockWrapped + '\n';
+  return { content: appended, status: 'appended' };
+}
+
 async function upsertRuleFile(filePath: string, content: string): Promise<'created' | 'updated' | 'appended'> {
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
   const wrappedContent = wrapWithMarkers(content);
@@ -347,25 +465,14 @@ async function upsertRuleFile(filePath: string, content: string): Promise<'creat
     return 'created';
   }
 
-  const startIdx = existing.indexOf(CONTEXTSTREAM_START_MARKER);
-  const endIdx = existing.indexOf(CONTEXTSTREAM_END_MARKER);
-
-  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-    const before = existing.substring(0, startIdx);
-    const after = existing.substring(endIdx + CONTEXTSTREAM_END_MARKER.length);
-    const updated = before.trimEnd() + '\n\n' + wrappedContent + '\n' + after.trimStart();
-    await fs.promises.writeFile(filePath, updated.trim() + '\n', 'utf8');
-    return 'updated';
-  }
-
-  if (isLegacyContextStreamRules(existing)) {
+  if (!existing.trim()) {
     await fs.promises.writeFile(filePath, wrappedContent + '\n', 'utf8');
     return 'updated';
   }
 
-  const joined = existing.trimEnd() + '\n\n' + wrappedContent + '\n';
-  await fs.promises.writeFile(filePath, joined, 'utf8');
-  return 'appended';
+  const replaced = replaceContextStreamBlock(existing, content);
+  await fs.promises.writeFile(filePath, replaced.content, 'utf8');
+  return replaced.status;
 }
 
 async function writeEditorRules(options: {
@@ -376,6 +483,7 @@ async function writeEditorRules(options: {
   projectName?: string;
   additionalRules?: string;
   mode?: 'minimal' | 'full';
+  overwriteExisting?: boolean;
 }): Promise<Array<{ editor: string; filename: string; status: string }>> {
   const editors = options.editors && options.editors.length > 0
     ? options.editors
@@ -398,6 +506,10 @@ async function writeEditorRules(options: {
     }
 
     const filePath = path.join(options.folderPath, rule.filename);
+    if (fs.existsSync(filePath) && !options.overwriteExisting) {
+      results.push({ editor, filename: rule.filename, status: 'skipped (exists)' });
+      continue;
+    }
     try {
       const status = await upsertRuleFile(filePath, rule.content);
       results.push({ editor, filename: rule.filename, status });
@@ -2688,6 +2800,7 @@ Access: Free`,
         workspace_id: z.string().uuid().optional().describe('Workspace ID (uses current session workspace if not provided)'),
         folder_path: z.string().optional().describe('Optional: Local folder path to associate with this project'),
         generate_editor_rules: z.boolean().optional().describe('Generate AI editor rules in folder_path (requires folder_path)'),
+        overwrite_existing: z.boolean().optional().describe('Allow overwriting existing rule files when generating editor rules'),
       }),
     },
     async (input) => {
@@ -2706,6 +2819,7 @@ Access: Free`,
 
       const projectData = result as { id?: string; name?: string };
       let rulesGenerated: string[] = [];
+      let rulesSkipped: string[] = [];
 
       // If folder_path provided, associate it with the project
       if (input.folder_path && projectData.id) {
@@ -2732,10 +2846,14 @@ Access: Free`,
               editors: getAvailableEditors(),
               workspaceId: workspaceId,
               projectName: input.name,
+              overwriteExisting: input.overwrite_existing,
             });
             rulesGenerated = ruleResults
               .filter(r => r.status === 'created' || r.status === 'updated' || r.status === 'appended')
               .map(r => (r.status === 'created' ? r.filename : `${r.filename} (${r.status})`));
+            rulesSkipped = ruleResults
+              .filter(r => r.status.startsWith('skipped'))
+              .map(r => r.filename);
           }
         } catch (err: unknown) {
           // Log but don't fail - project was created successfully
@@ -2748,6 +2866,7 @@ Access: Free`,
         folder_path: input.folder_path,
         config_written: input.folder_path ? true : undefined,
         editor_rules_generated: rulesGenerated.length > 0 ? rulesGenerated : undefined,
+        editor_rules_skipped: rulesSkipped.length > 0 ? rulesSkipped : undefined,
       };
 
       return { content: [{ type: 'text' as const, text: formatContent(response) }], structuredContent: toStructured(response) };
@@ -4012,6 +4131,7 @@ Optionally generates AI editor rules for automatic ContextStream usage.`,
         workspace_name: z.string().optional().describe('Workspace name for reference'),
         create_parent_mapping: z.boolean().optional().describe('Also create a parent folder mapping (e.g., /dev/maker/* -> workspace)'),
         generate_editor_rules: z.boolean().optional().describe('Generate AI editor rules for Windsurf, Cursor, Cline, Kilo Code, Roo Code, Claude Code, and Aider'),
+        overwrite_existing: z.boolean().optional().describe('Allow overwriting existing rule files when generating editor rules'),
       }),
     },
     async (input) => {
@@ -4019,21 +4139,27 @@ Optionally generates AI editor rules for automatic ContextStream usage.`,
       
       // Optionally generate editor rules
       let rulesGenerated: string[] = [];
+      let rulesSkipped: string[] = [];
       if (input.generate_editor_rules) {
         const ruleResults = await writeEditorRules({
           folderPath: input.folder_path,
           editors: getAvailableEditors(),
           workspaceName: input.workspace_name,
           workspaceId: input.workspace_id,
+          overwriteExisting: input.overwrite_existing,
         });
         rulesGenerated = ruleResults
           .filter(r => r.status === 'created' || r.status === 'updated' || r.status === 'appended')
           .map(r => (r.status === 'created' ? r.filename : `${r.filename} (${r.status})`));
+        rulesSkipped = ruleResults
+          .filter(r => r.status.startsWith('skipped'))
+          .map(r => r.filename);
       }
       
       const response = {
         ...result,
         editor_rules_generated: rulesGenerated.length > 0 ? rulesGenerated : undefined,
+        editor_rules_skipped: rulesSkipped.length > 0 ? rulesSkipped : undefined,
       };
       
       return { content: [{ type: 'text' as const, text: formatContent(response) }], structuredContent: toStructured(response) };
@@ -4058,6 +4184,7 @@ Behavior:
         visibility: z.enum(['private', 'public']).optional().describe('Workspace visibility (default: private)'),
         create_parent_mapping: z.boolean().optional().describe('Also create a parent folder mapping (e.g., /dev/company/* -> workspace)'),
         generate_editor_rules: z.boolean().optional().describe('Generate AI editor rules in the folder for automatic ContextStream usage'),
+        overwrite_existing: z.boolean().optional().describe('Allow overwriting existing rule files when generating editor rules'),
         context_hint: z.string().optional().describe('Optional context hint for session initialization'),
         auto_index: z.boolean().optional().describe('Automatically create and index project from folder (default: true)'),
       }),
@@ -4121,16 +4248,21 @@ Behavior:
 
       // Optionally generate editor rules
       let rulesGenerated: string[] = [];
+      let rulesSkipped: string[] = [];
       if (input.generate_editor_rules) {
         const ruleResults = await writeEditorRules({
           folderPath,
           editors: getAvailableEditors(),
           workspaceName: newWorkspace.name || input.workspace_name,
           workspaceId: newWorkspace.id,
+          overwriteExisting: input.overwrite_existing,
         });
         rulesGenerated = ruleResults
           .filter(r => r.status === 'created' || r.status === 'updated' || r.status === 'appended')
           .map(r => (r.status === 'created' ? r.filename : `${r.filename} (${r.status})`));
+        rulesSkipped = ruleResults
+          .filter(r => r.status.startsWith('skipped'))
+          .map(r => r.filename);
       }
 
       // Initialize a session for this folder; this creates the project (folder name) and starts indexing (if enabled)
@@ -4161,6 +4293,7 @@ Behavior:
           },
           association: associateResult,
           editor_rules_generated: rulesGenerated.length > 0 ? rulesGenerated : undefined,
+          editor_rules_skipped: rulesSkipped.length > 0 ? rulesSkipped : undefined,
         },
       };
 
@@ -4589,6 +4722,7 @@ Supported editors: ${getAvailableEditors().join(', ')}`,
         project_name: z.string().optional().describe('Project name to include in rules'),
         additional_rules: z.string().optional().describe('Additional project-specific rules to append'),
         mode: z.enum(['minimal', 'full']).optional().describe('Rule verbosity mode (default: minimal)'),
+        overwrite_existing: z.boolean().optional().describe('Allow overwriting existing rule files (ContextStream block only)'),
         dry_run: z.boolean().optional().describe('If true, return content without writing files'),
       }),
     },
@@ -4635,16 +4769,21 @@ Supported editors: ${getAvailableEditors().join(', ')}`,
           projectName: input.project_name,
           additionalRules: input.additional_rules,
           mode: input.mode,
+          overwriteExisting: input.overwrite_existing,
         });
         results.push(...writeResults);
       }
       
+      const createdCount = results.filter(r => r.status === 'created' || r.status === 'updated' || r.status === 'appended').length;
+      const skippedCount = results.filter(r => r.status.startsWith('skipped')).length;
       const summary = {
         folder: folderPath,
         results,
         message: input.dry_run 
           ? 'Dry run complete. Use dry_run: false to write files.'
-          : `Generated ${results.filter(r => r.status === 'created' || r.status === 'updated' || r.status === 'appended').length} rule files.`,
+          : skippedCount > 0
+            ? `Generated ${createdCount} rule files. ${skippedCount} skipped (existing files). Re-run with overwrite_existing: true to replace ContextStream blocks.`
+            : `Generated ${createdCount} rule files.`,
       };
       
       return { content: [{ type: 'text' as const, text: formatContent(summary) }], structuredContent: toStructured(summary) };

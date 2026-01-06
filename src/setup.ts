@@ -107,6 +107,19 @@ const LEGACY_CONTEXTSTREAM_ALLOWED_HEADINGS = [
   'plans & tasks',
   'complete action reference',
 ];
+const CONTEXTSTREAM_PREAMBLE_PATTERNS: RegExp[] = [
+  /^#\s+workspace:/i,
+  /^#\s+project:/i,
+  /^#\s+workspace id:/i,
+  /^#\s+codex cli instructions$/i,
+  /^#\s+claude code instructions$/i,
+  /^#\s+cursor rules$/i,
+  /^#\s+windsurf rules$/i,
+  /^#\s+cline rules$/i,
+  /^#\s+kilo code rules$/i,
+  /^#\s+roo code rules$/i,
+  /^#\s+aider configuration$/i,
+];
 
 function wrapWithMarkers(content: string): string {
   return `${CONTEXTSTREAM_START_MARKER}\n${content.trim()}\n${CONTEXTSTREAM_END_MARKER}`;
@@ -130,6 +143,110 @@ function isLegacyContextStreamRules(content: string): boolean {
   return hasHeading;
 }
 
+function isContextStreamPreamble(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  return CONTEXTSTREAM_PREAMBLE_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
+function findContextStreamHeading(lines: string[]): { index: number; level: number } | null {
+  const headingRegex = /^(#{1,6})\s+(.+)$/;
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = headingRegex.exec(lines[i]);
+    if (!match) continue;
+    if (match[2].toLowerCase().includes('contextstream')) {
+      return { index: i, level: match[1].length };
+    }
+  }
+  return null;
+}
+
+function findSectionEnd(lines: string[], startLine: number, level: number): number {
+  const headingRegex = /^(#{1,6})\s+(.+)$/;
+  for (let i = startLine + 1; i < lines.length; i += 1) {
+    const match = headingRegex.exec(lines[i]);
+    if (!match) continue;
+    if (match[1].length <= level) return i;
+  }
+  return lines.length;
+}
+
+function extractContextStreamBlock(content: string): string {
+  const lines = content.split(/\r?\n/);
+  const heading = findContextStreamHeading(lines);
+  if (!heading) return content.trim();
+  const endLine = findSectionEnd(lines, heading.index, heading.level);
+  return lines.slice(heading.index, endLine).join('\n').trim();
+}
+
+function findLegacyContextStreamSection(content: string): { startLine: number; endLine: number; contextLine: number } | null {
+  const lines = content.split(/\r?\n/);
+  const heading = findContextStreamHeading(lines);
+  if (!heading) return null;
+
+  let startLine = heading.index;
+  for (let i = heading.index - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (!line.trim()) {
+      startLine = i;
+      continue;
+    }
+    if (isContextStreamPreamble(line)) {
+      startLine = i;
+      continue;
+    }
+    break;
+  }
+
+  const endLine = findSectionEnd(lines, heading.index, heading.level);
+  return { startLine, endLine, contextLine: heading.index };
+}
+
+function blockHasPreamble(block: string): boolean {
+  const lines = block.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (isContextStreamPreamble(trimmed)) return true;
+    if (/^#{1,6}\s+/.test(trimmed)) return false;
+  }
+  return false;
+}
+
+function replaceContextStreamBlock(existing: string, content: string): { content: string; status: 'updated' | 'appended' } {
+  const fullWrapped = wrapWithMarkers(content);
+  const blockWrapped = wrapWithMarkers(extractContextStreamBlock(content));
+
+  const startIdx = existing.indexOf(CONTEXTSTREAM_START_MARKER);
+  const endIdx = existing.indexOf(CONTEXTSTREAM_END_MARKER);
+
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    const existingBlock = existing.slice(startIdx + CONTEXTSTREAM_START_MARKER.length, endIdx);
+    const replacement = blockHasPreamble(existingBlock) ? fullWrapped : blockWrapped;
+    const before = existing.substring(0, startIdx).trimEnd();
+    const after = existing.substring(endIdx + CONTEXTSTREAM_END_MARKER.length).trimStart();
+    const merged = [before, replacement, after].filter((part) => part.length > 0).join('\n\n');
+    return { content: merged.trim() + '\n', status: 'updated' };
+  }
+
+  const legacy = findLegacyContextStreamSection(existing);
+  if (legacy) {
+    const lines = existing.split(/\r?\n/);
+    const before = lines.slice(0, legacy.startLine).join('\n').trimEnd();
+    const after = lines.slice(legacy.endLine).join('\n').trimStart();
+    const replacement = legacy.startLine < legacy.contextLine ? fullWrapped : blockWrapped;
+    const merged = [before, replacement, after].filter((part) => part.length > 0).join('\n\n');
+    return { content: merged.trim() + '\n', status: 'updated' };
+  }
+
+  if (isLegacyContextStreamRules(existing)) {
+    return { content: fullWrapped + '\n', status: 'updated' };
+  }
+
+  const appended = existing.trimEnd() + '\n\n' + blockWrapped + '\n';
+  return { content: appended, status: 'appended' };
+}
+
 async function upsertTextFile(filePath: string, content: string, _marker: string): Promise<'created' | 'appended' | 'updated'> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const exists = await fileExists(filePath);
@@ -141,30 +258,14 @@ async function upsertTextFile(filePath: string, content: string, _marker: string
   }
 
   const existing = await fs.readFile(filePath, 'utf8').catch(() => '');
-
-  // Check for start/end markers to replace existing content
-  const startIdx = existing.indexOf(CONTEXTSTREAM_START_MARKER);
-  const endIdx = existing.indexOf(CONTEXTSTREAM_END_MARKER);
-
-  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-    // Replace content between markers (inclusive)
-    const before = existing.substring(0, startIdx);
-    const after = existing.substring(endIdx + CONTEXTSTREAM_END_MARKER.length);
-    const updated = before.trimEnd() + '\n\n' + wrappedContent + '\n' + after.trimStart();
-    await fs.writeFile(filePath, updated.trim() + '\n', 'utf8');
-    return 'updated';
-  }
-
-  // Legacy: replace old ContextStream-only rules with the new marker-wrapped block.
-  if (isLegacyContextStreamRules(existing)) {
+  if (!existing.trim()) {
     await fs.writeFile(filePath, wrappedContent + '\n', 'utf8');
     return 'updated';
   }
 
-  // No existing ContextStream content - append
-  const joined = existing.trimEnd() + '\n\n' + wrappedContent + '\n';
-  await fs.writeFile(filePath, joined, 'utf8');
-  return 'appended';
+  const replaced = replaceContextStreamBlock(existing, content);
+  await fs.writeFile(filePath, replaced.content, 'utf8');
+  return replaced.status;
 }
 
 function globalRulesPathForEditor(editor: EditorKey): string | null {
@@ -636,6 +737,29 @@ export async function runSetupWizard(args: string[]): Promise<void> {
   const rl = createInterface({ input: stdin, output: stdout });
 
   const writeActions: Array<{ kind: 'rules' | 'workspace-config' | 'mcp-config'; target: string; status: string }> = [];
+  let overwriteAllRules: boolean | null = null;
+  let skipAllRules = false;
+
+  const confirmOverwriteRules = async (filePath: string): Promise<boolean> => {
+    if (dryRun) return true;
+    if (skipAllRules) return false;
+    if (overwriteAllRules) return true;
+    const exists = await fileExists(filePath);
+    if (!exists) return true;
+
+    const answer = normalizeInput(
+      await rl.question(`Rules file already exists at ${filePath}. Replace ContextStream block? [y/N/a/s]: `)
+    ).toLowerCase();
+    if (answer === 'a' || answer === 'all') {
+      overwriteAllRules = true;
+      return true;
+    }
+    if (answer === 's' || answer === 'skip-all' || answer === 'none') {
+      skipAllRules = true;
+      return false;
+    }
+    return answer === 'y' || answer === 'yes';
+  };
 
   try {
     console.log(`ContextStream Setup Wizard (v${VERSION})`);
@@ -1094,6 +1218,13 @@ export async function runSetupWizard(args: string[]): Promise<void> {
           continue;
         }
 
+        const allowOverwrite = await confirmOverwriteRules(filePath);
+        if (!allowOverwrite) {
+          writeActions.push({ kind: 'rules', target: filePath, status: 'skipped' });
+          console.log(`- ${EDITOR_LABELS[editor]}: skipped ${filePath}`);
+          continue;
+        }
+
         const status = await upsertTextFile(filePath, rule.content, 'ContextStream');
         writeActions.push({ kind: 'rules', target: filePath, status });
         console.log(`- ${EDITOR_LABELS[editor]}: ${status} ${filePath}`);
@@ -1255,6 +1386,11 @@ export async function runSetupWizard(args: string[]): Promise<void> {
           continue;
         }
         try {
+          const allowOverwrite = await confirmOverwriteRules(filePath);
+          if (!allowOverwrite) {
+            writeActions.push({ kind: 'rules', target: filePath, status: 'skipped' });
+            continue;
+          }
           const status = await upsertTextFile(filePath, rule.content, 'ContextStream');
           writeActions.push({ kind: 'rules', target: filePath, status });
         } catch (err: any) {
