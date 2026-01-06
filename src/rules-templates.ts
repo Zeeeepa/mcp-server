@@ -56,7 +56,7 @@ Rules Version: ${RULES_VERSION}
 
 | Message | What to Call |
 |---------|--------------|
-| **1st message** | \`session_init(folder_path="...", context_hint="<user's message>")\` |
+| **1st message** | \`session_init(folder_path="...", context_hint="<user's message>")\`, then \`context_smart(user_message="<user's message>", format="minified", max_tokens=400)\` |
 | **2nd+ messages** | \`context_smart(user_message="<user's message>", format="minified", max_tokens=400)\` |
 | **Before risky/non-trivial work** | \`session(action="get_lessons", query="<topic>")\` |
 | **After completing task** | \`session(action="capture", event_type="decision", ...)\` - MUST capture |
@@ -64,6 +64,8 @@ Rules Version: ${RULES_VERSION}
 | **Command/tool error + fix** | \`session(action="capture_lesson", ...)\` - MUST capture lessons |
 
 **NO EXCEPTIONS.** Do not skip even if you think you have enough context.
+
+**First message rule:** After \`session_init\`, always call \`context_smart\` before any other tool or response.
 
 **Context Pack (Pro+):** If enabled, use \`context_smart(..., mode="pack", distill=true)\` for code/file queries. If unavailable or disabled, omit \`mode\` and proceed with standard \`context_smart\` (the API will fall back).
 
@@ -77,7 +79,7 @@ v0.4.x consolidates ~58 individual tools into ~11 domain tools with action/mode 
 
 ### Standalone Tools (Always Call)
 - **\`session_init\`** - Initialize session with workspace detection + context
-- **\`context_smart\`** - Semantic search for relevant context (CALL EVERY MESSAGE)
+- **\`context_smart\`** - Semantic search for relevant context (CALL EVERY MESSAGE, including immediately after \`session_init\`)
 
 ### Domain Tools (Use action/mode parameter)
 
@@ -248,7 +250,7 @@ Rules Version: ${RULES_VERSION}
 
 | Message | What to Call |
 |---------|--------------|
-| **1st message** | \`session_init(folder_path="<cwd>", context_hint="<user_message>")\` |
+| **1st message** | \`session_init(folder_path="<cwd>", context_hint="<user_message>")\`, then \`context_smart(user_message="<user_message>", format="minified", max_tokens=400)\` |
 | **2nd+ messages** | \`context_smart(user_message="<user_message>", format="minified", max_tokens=400)\` |
 | **Capture decisions** | \`session(action="capture", event_type="decision", title="...", content="...")\` |
 | **Before risky work** | \`session(action="get_lessons", query="<topic>")\` |
@@ -273,7 +275,7 @@ Rules Version: ${RULES_VERSION}
 
 ### Behavior Rules
 
-- **First message**: Always call \`session_init\` with context_hint
+- **First message**: Call \`session_init\` with context_hint, then call \`context_smart\` before any other tool or response
 - **Every message after**: Always call \`context_smart\` BEFORE responding (semantic search for relevant context)
 - **Before searching files/code**: Check \`project(action="index_status")\`; if missing/stale run \`project(action="ingest_local", path="<cwd>")\` or \`project(action="index")\`, and use \`graph(action="ingest")\` if needed
 - **For discovery**: Use \`session(action="smart_search")\` or \`search(mode="hybrid")\` before any local repo scans
