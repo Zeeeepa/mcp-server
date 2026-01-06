@@ -3848,6 +3848,8 @@ Use this to persist decisions, insights, preferences, or important information.`
         session_id: z.string().optional().describe('Session ID to associate with this capture'),
         event_type: z.enum([
           'conversation', 'decision', 'insight', 'preference', 'task', 'bug', 'feature',
+          // Plans & Tasks feature
+          'plan',          // Implementation plan
           // Lesson system types
           'correction',    // User corrected the AI
           'lesson',        // Extracted lesson from correction
@@ -5568,7 +5570,7 @@ Use this to remove a reminder that is no longer relevant.`,
           query: z.string().optional().describe('Query for recall/search/lessons/decision_trace'),
           content: z.string().optional().describe('Content for capture/remember/compress'),
           title: z.string().optional().describe('Title for capture/capture_lesson/capture_plan'),
-          event_type: z.enum(['decision', 'preference', 'insight', 'task', 'bug', 'feature', 'correction', 'lesson', 'warning', 'frustration', 'conversation']).optional().describe('Event type for capture'),
+          event_type: z.enum(['decision', 'preference', 'insight', 'task', 'bug', 'feature', 'plan', 'correction', 'lesson', 'warning', 'frustration', 'conversation']).optional().describe('Event type for capture'),
           importance: z.enum(['low', 'medium', 'high', 'critical']).optional(),
           tags: z.array(z.string()).optional(),
           // Lesson-specific
