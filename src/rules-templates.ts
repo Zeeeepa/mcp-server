@@ -61,6 +61,8 @@ v0.4.x uses **~11 consolidated domain tools** for ~75% token reduction vs previo
 
 **NO EXCEPTIONS.** Do not skip even if you think you have enough context.
 
+**Context Pack (Pro+):** If enabled, use \`context_smart(..., mode="pack", distill=true)\` for code/file queries. If unavailable, omit \`mode\` and use standard \`context_smart\`.
+
 ---
 
 ## Consolidated Domain Tools Architecture
@@ -123,6 +125,18 @@ If context still feels missing, use \`session(action="recall", query="...")\` fo
 - On frustration/corrections: \`session(action="capture_lesson", title="...", trigger="...", impact="...", prevention="...")\`
 
 ---
+
+### Index & Graph Preflight (REQUIRED for code/file search)
+
+Before searching files or code, confirm the project is indexed and the graph is available:
+
+1. \`project(action="index_status")\` for the current project
+2. If missing/stale:
+   - Local repo: \`project(action="ingest_local", path="<cwd>")\`
+   - Otherwise: \`project(action="index")\`
+3. If graph queries are empty/unavailable: \`graph(action="ingest")\`
+
+Only after this preflight, proceed with search/analysis below.
 
 ### Search & Code Intelligence (ContextStream-first)
 
@@ -205,6 +219,8 @@ v0.4.x uses ~11 consolidated domain tools for ~75% token reduction vs previous v
 | **Before risky work** | \`session(action="get_lessons", query="<topic>")\` |
 | **On user frustration** | \`session(action="capture_lesson", title="...", trigger="...", impact="...", prevention="...")\` |
 
+**Context Pack (Pro+):** If enabled, use \`context_smart(..., mode="pack", distill=true)\` for code/file queries. If unavailable, omit \`mode\`.
+
 ### Quick Reference: Domain Tools
 
 | Tool | Common Usage |
@@ -222,6 +238,7 @@ v0.4.x uses ~11 consolidated domain tools for ~75% token reduction vs previous v
 
 - **First message**: Always call \`session_init\` with context_hint
 - **Every message after**: Always call \`context_smart\` BEFORE responding (semantic search for relevant context)
+- **Before searching files/code**: Check \`project(action="index_status")\`; if missing/stale run \`project(action="ingest_local", path="<cwd>")\` or \`project(action="index")\`, and use \`graph(action="ingest")\` if needed
 - **For discovery**: Use \`session(action="smart_search")\` or \`search(mode="hybrid")\` before local repo scans
 - **For code analysis**: Use \`graph(action="dependencies")\` or \`graph(action="impact")\` for call/dependency analysis
 - **After completing work**: Always capture decisions/insights with \`session(action="capture")\`

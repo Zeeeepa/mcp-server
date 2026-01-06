@@ -2,6 +2,14 @@ import { z } from 'zod';
 
 const DEFAULT_API_URL = 'https://api.contextstream.io';
 
+function parseBooleanEnv(value?: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return undefined;
+}
+
 const configSchema = z.object({
   apiUrl: z.string().url().default(DEFAULT_API_URL),
   apiKey: z.string().min(1).optional(),
@@ -10,6 +18,7 @@ const configSchema = z.object({
   defaultProjectId: z.string().uuid().optional(),
   userAgent: z.string().default('contextstream-mcp/0.1.0'),
   allowHeaderAuth: z.boolean().optional(),
+  contextPackEnabled: z.boolean().default(true),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -28,6 +37,9 @@ export function loadConfig(): Config {
     process.env.CONTEXTSTREAM_ALLOW_HEADER_AUTH === '1' ||
     process.env.CONTEXTSTREAM_ALLOW_HEADER_AUTH === 'true' ||
     process.env.CONTEXTSTREAM_ALLOW_HEADER_AUTH === 'yes';
+  const contextPackEnabled = parseBooleanEnv(
+    process.env.CONTEXTSTREAM_CONTEXT_PACK ?? process.env.CONTEXTSTREAM_CONTEXT_PACK_ENABLED
+  );
   const parsed = configSchema.safeParse({
     apiUrl: process.env.CONTEXTSTREAM_API_URL,
     apiKey: process.env.CONTEXTSTREAM_API_KEY,
@@ -36,6 +48,7 @@ export function loadConfig(): Config {
     defaultProjectId: process.env.CONTEXTSTREAM_PROJECT_ID,
     userAgent: process.env.CONTEXTSTREAM_USER_AGENT,
     allowHeaderAuth,
+    contextPackEnabled,
   });
 
   if (!parsed.success) {

@@ -303,7 +303,7 @@ type McpServerJson = {
 
 const IS_WINDOWS = process.platform === 'win32';
 
-function buildContextStreamMcpServer(params: { apiUrl: string; apiKey: string; toolset?: Toolset }): McpServerJson {
+function buildContextStreamMcpServer(params: { apiUrl: string; apiKey: string; toolset?: Toolset; contextPackEnabled?: boolean }): McpServerJson {
   const env: Record<string, string> = {
     CONTEXTSTREAM_API_URL: params.apiUrl,
     CONTEXTSTREAM_API_KEY: params.apiKey,
@@ -312,6 +312,7 @@ function buildContextStreamMcpServer(params: { apiUrl: string; apiKey: string; t
   if (params.toolset === 'router') {
     env.CONTEXTSTREAM_PROGRESSIVE_MODE = 'true';
   }
+  env.CONTEXTSTREAM_CONTEXT_PACK = params.contextPackEnabled === false ? 'false' : 'true';
   // consolidated is the default, no env var needed
   // Windows requires cmd /c wrapper to execute npx
   if (IS_WINDOWS) {
@@ -335,7 +336,7 @@ type VsCodeServerJson = {
   env: Record<string, string>;
 };
 
-function buildContextStreamVsCodeServer(params: { apiUrl: string; apiKey: string; toolset?: Toolset }): VsCodeServerJson {
+function buildContextStreamVsCodeServer(params: { apiUrl: string; apiKey: string; toolset?: Toolset; contextPackEnabled?: boolean }): VsCodeServerJson {
   const env: Record<string, string> = {
     CONTEXTSTREAM_API_URL: params.apiUrl,
     CONTEXTSTREAM_API_KEY: params.apiKey,
@@ -344,6 +345,7 @@ function buildContextStreamVsCodeServer(params: { apiUrl: string; apiKey: string
   if (params.toolset === 'router') {
     env.CONTEXTSTREAM_PROGRESSIVE_MODE = 'true';
   }
+  env.CONTEXTSTREAM_CONTEXT_PACK = params.contextPackEnabled === false ? 'false' : 'true';
   // consolidated is the default, no env var needed
   // Windows requires cmd /c wrapper to execute npx
   if (IS_WINDOWS) {
@@ -450,7 +452,10 @@ function claudeDesktopConfigPath(): string | null {
   return null;
 }
 
-async function upsertCodexTomlConfig(filePath: string, params: { apiUrl: string; apiKey: string; toolset?: Toolset }): Promise<'created' | 'updated' | 'skipped'> {
+async function upsertCodexTomlConfig(
+  filePath: string,
+  params: { apiUrl: string; apiKey: string; toolset?: Toolset; contextPackEnabled?: boolean }
+): Promise<'created' | 'updated' | 'skipped'> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const exists = await fileExists(filePath);
   const existing = exists ? await fs.readFile(filePath, 'utf8').catch(() => '') : '';
@@ -460,6 +465,7 @@ async function upsertCodexTomlConfig(filePath: string, params: { apiUrl: string;
 
   // v0.4.x: consolidated is default, router uses PROGRESSIVE_MODE
   const toolsetLine = params.toolset === 'router' ? `CONTEXTSTREAM_PROGRESSIVE_MODE = "true"\n` : '';
+  const contextPackLine = `CONTEXTSTREAM_CONTEXT_PACK = "${params.contextPackEnabled === false ? 'false' : 'true'}"\n`;
   // Windows requires cmd /c wrapper to execute npx
   const commandLine = IS_WINDOWS
     ? `command = "cmd"\nargs = ["/c", "npx", "-y", "@contextstream/mcp-server"]\n`
@@ -471,7 +477,8 @@ async function upsertCodexTomlConfig(filePath: string, params: { apiUrl: string;
     `\n[mcp_servers.contextstream.env]\n` +
     `CONTEXTSTREAM_API_URL = "${params.apiUrl}"\n` +
     `CONTEXTSTREAM_API_KEY = "${params.apiKey}"\n` +
-    toolsetLine;
+    toolsetLine +
+    contextPackLine;
 
   if (!exists) {
     await fs.writeFile(filePath, block.trimStart(), 'utf8');
@@ -484,7 +491,18 @@ async function upsertCodexTomlConfig(filePath: string, params: { apiUrl: string;
   }
 
   if (!existing.includes(envMarker)) {
-    await fs.writeFile(filePath, existing.trimEnd() + '\n\n' + envMarker + '\n' + `CONTEXTSTREAM_API_URL = "${params.apiUrl}"\n` + `CONTEXTSTREAM_API_KEY = "${params.apiKey}"\n`, 'utf8');
+    await fs.writeFile(
+      filePath,
+      existing.trimEnd() +
+        '\n\n' +
+        envMarker +
+        '\n' +
+        `CONTEXTSTREAM_API_URL = "${params.apiUrl}"\n` +
+        `CONTEXTSTREAM_API_KEY = "${params.apiKey}"\n` +
+        toolsetLine +
+        contextPackLine,
+      'utf8'
+    );
     return 'updated';
   }
 
@@ -493,6 +511,7 @@ async function upsertCodexTomlConfig(filePath: string, params: { apiUrl: string;
   let inEnv = false;
   let sawUrl = false;
   let sawKey = false;
+  let sawContextPack = false;
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -500,6 +519,7 @@ async function upsertCodexTomlConfig(filePath: string, params: { apiUrl: string;
       if (inEnv && trimmed !== envMarker) {
         if (!sawUrl) out.push(`CONTEXTSTREAM_API_URL = "${params.apiUrl}"`);
         if (!sawKey) out.push(`CONTEXTSTREAM_API_KEY = "${params.apiKey}"`);
+        if (!sawContextPack) out.push(`CONTEXTSTREAM_CONTEXT_PACK = "${params.contextPackEnabled === false ? 'false' : 'true'}"`);
         inEnv = false;
       }
       if (trimmed === envMarker) inEnv = true;
@@ -517,12 +537,18 @@ async function upsertCodexTomlConfig(filePath: string, params: { apiUrl: string;
       sawKey = true;
       continue;
     }
+    if (inEnv && /^\s*CONTEXTSTREAM_CONTEXT_PACK\s*=/.test(line)) {
+      out.push(`CONTEXTSTREAM_CONTEXT_PACK = "${params.contextPackEnabled === false ? 'false' : 'true'}"`);
+      sawContextPack = true;
+      continue;
+    }
     out.push(line);
   }
 
   if (inEnv) {
     if (!sawUrl) out.push(`CONTEXTSTREAM_API_URL = "${params.apiUrl}"`);
     if (!sawKey) out.push(`CONTEXTSTREAM_API_KEY = "${params.apiKey}"`);
+    if (!sawContextPack) out.push(`CONTEXTSTREAM_CONTEXT_PACK = "${params.contextPackEnabled === false ? 'false' : 'true'}"`);
   }
 
   const updated = out.join('\n');
@@ -823,6 +849,12 @@ export async function runSetupWizard(args: string[]): Promise<void> {
     const toolsetChoice = normalizeInput(await rl.question('Choose [1/2] (default 1): ')) || '1';
     const toolset: Toolset = toolsetChoice === '2' ? 'router' : 'consolidated';
 
+    console.log('\nContext Pack (Pro+ plans):');
+    console.log('  Fast indexed code + graph context with optional distillation.');
+    console.log('  Uses more operations/credits; can be disabled in settings or via env.');
+    const contextPackChoice = normalizeInput(await rl.question('Enable Context Pack? [Y/n]: '));
+    const contextPackEnabled = !(contextPackChoice.toLowerCase() === 'n' || contextPackChoice.toLowerCase() === 'no');
+
     const editors: EditorKey[] = ['codex', 'claude', 'cursor', 'windsurf', 'cline', 'kilo', 'roo', 'aider'];
     console.log('\nSelect editors to configure (comma-separated numbers, or "all"):');
     editors.forEach((e, i) => console.log(`  ${i + 1}) ${EDITOR_LABELS[e]}`));
@@ -900,9 +932,9 @@ export async function runSetupWizard(args: string[]): Promise<void> {
 
     // Build MCP server configs with selected toolset
     // v0.4.x: consolidated (~11 tools) is default, router (~2 tools) uses PROGRESSIVE_MODE
-    const mcpServer = buildContextStreamMcpServer({ apiUrl, apiKey, toolset });
-    const mcpServerClaude = buildContextStreamMcpServer({ apiUrl, apiKey, toolset });
-    const vsCodeServer = buildContextStreamVsCodeServer({ apiUrl, apiKey, toolset });
+    const mcpServer = buildContextStreamMcpServer({ apiUrl, apiKey, toolset, contextPackEnabled });
+    const mcpServerClaude = buildContextStreamMcpServer({ apiUrl, apiKey, toolset, contextPackEnabled });
+    const vsCodeServer = buildContextStreamVsCodeServer({ apiUrl, apiKey, toolset, contextPackEnabled });
 
     // Global MCP config
     const needsGlobalMcpConfig = mcpScope === 'global' || mcpScope === 'both' || (mcpScope === 'project' && hasCodex);
@@ -919,7 +951,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
               console.log(`- ${EDITOR_LABELS[editor]}: would update ${filePath}`);
               continue;
             }
-            const status = await upsertCodexTomlConfig(filePath, { apiUrl, apiKey, toolset });
+            const status = await upsertCodexTomlConfig(filePath, { apiUrl, apiKey, toolset, contextPackEnabled });
             writeActions.push({ kind: 'mcp-config', target: filePath, status });
             console.log(`- ${EDITOR_LABELS[editor]}: ${status} ${filePath}`);
             continue;
@@ -957,7 +989,8 @@ export async function runSetupWizard(args: string[]): Promise<void> {
 
 	            console.log('- Claude Code: global MCP config is best done via `claude mcp add --transport stdio ...` (see docs).');
 	            const envHint = toolset === 'router' ? ' --env CONTEXTSTREAM_PROGRESSIVE_MODE=true' : '';
-	            console.log(`  macOS/Linux: claude mcp add --transport stdio contextstream --scope user --env CONTEXTSTREAM_API_URL=... --env CONTEXTSTREAM_API_KEY=...${envHint} -- npx -y @contextstream/mcp-server`);
+              const packHint = contextPackEnabled === false ? ' --env CONTEXTSTREAM_CONTEXT_PACK=false' : ' --env CONTEXTSTREAM_CONTEXT_PACK=true';
+	            console.log(`  macOS/Linux: claude mcp add --transport stdio contextstream --scope user --env CONTEXTSTREAM_API_URL=... --env CONTEXTSTREAM_API_KEY=...${envHint}${packHint} -- npx -y @contextstream/mcp-server`);
 	            console.log('  Windows (native): use `cmd /c npx -y @contextstream/mcp-server` after `--` if `npx` is not found.');
 	            continue;
 	          }
@@ -1197,6 +1230,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
       const toolsetDesc = toolset === 'router' ? '~2 meta-tools (router mode)' : '~11 domain tools (consolidated)';
       console.log(`Toolset: ${toolset} (${toolsetDesc})`);
       console.log(`Token reduction: ~75% compared to previous versions.`);
+      console.log(`Context Pack: ${contextPackEnabled ? 'enabled' : 'disabled'}`);
     }
 
     console.log('\nNext steps:');
@@ -1206,6 +1240,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
     if (toolset === 'router') {
       console.log('- Router mode uses 2 meta-tools (session_init + context_smart) for ultra-minimal token usage.');
     }
+    console.log('- Toggle Context Pack with CONTEXTSTREAM_CONTEXT_PACK=true|false (and in dashboard settings).');
 
     console.log('');
     console.log("You're set up! Now try these prompts in your AI tool:");

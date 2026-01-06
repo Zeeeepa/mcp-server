@@ -325,6 +325,7 @@ Set **one** of:
 |----------|-------------|
 | `CONTEXTSTREAM_CONSOLIDATED` | `true` (default in v0.4.x) uses consolidated domain tools |
 | `CONTEXTSTREAM_PROGRESSIVE_MODE` | Enables Router mode (~2 meta-tools) |
+| `CONTEXTSTREAM_CONTEXT_PACK` | Enable Context Pack for `context_smart` (code + graph + distill). Defaults to `true` |
 | `CONTEXTSTREAM_TOOLSET` | Legacy granular tool bundle: `light` / `standard` / `complete` (only when consolidated is off) |
 | `CONTEXTSTREAM_TOOL_ALLOWLIST` | Comma-separated tool names to expose (legacy granular mode) |
 | `CONTEXTSTREAM_SCHEMA_MODE` | Reduce schema verbosity; e.g., `compact` |

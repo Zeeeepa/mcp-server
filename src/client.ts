@@ -2364,6 +2364,8 @@ export class ContextStreamClient {
     project_id?: string;
     max_tokens?: number;
     format?: 'minified' | 'readable' | 'structured';
+    mode?: 'standard' | 'pack';
+    distill?: boolean;
   }): Promise<{
     context: string;
     token_estimate: number;
@@ -2377,6 +2379,8 @@ export class ContextStreamClient {
     const withDefaults = this.withDefaults(params);
     const maxTokens = params.max_tokens || 800;
     const format = params.format || 'minified';
+    const usePackDefault = this.config.contextPackEnabled !== false && !!withDefaults.project_id;
+    const mode = params.mode || (usePackDefault ? 'pack' : 'standard');
     
     if (!withDefaults.workspace_id) {
       return {
@@ -2385,6 +2389,42 @@ export class ContextStreamClient {
         format,
         sources_used: 0,
       };
+    }
+
+    try {
+      const apiResult = await request(this.config, '/context/smart', {
+        body: {
+          user_message: params.user_message,
+          workspace_id: withDefaults.workspace_id,
+          project_id: withDefaults.project_id,
+          max_tokens: maxTokens,
+          format,
+          mode,
+          distill: params.distill,
+        },
+      });
+      const data = unwrapApiResponse<any>(apiResult);
+
+      let versionNotice: VersionNotice | null = null;
+      try {
+        versionNotice = await getUpdateNotice();
+      } catch {
+        // ignore version check failures
+      }
+
+      return {
+        context: String(data?.context ?? ''),
+        token_estimate: Number(data?.token_estimate ?? Math.ceil(String(data?.context ?? '').length / 4)),
+        format: String(data?.format ?? format),
+        sources_used: Number(data?.sources_used ?? 0),
+        workspace_id: withDefaults.workspace_id,
+        project_id: withDefaults.project_id,
+        ...(versionNotice ? { version_notice: versionNotice } : {}),
+        ...(Array.isArray(data?.errors) ? { errors: data.errors } : {}),
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[ContextStream] context_smart remote failed, using local fallback: ${message}`);
     }
 
     // Extract keywords from user message for targeted search

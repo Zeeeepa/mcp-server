@@ -86,6 +86,7 @@ Environment variables:
   CONTEXTSTREAM_ROUTER_MODE   Router pattern: true|false (default: false, exposes only 2 meta-tools)
   CONTEXTSTREAM_OUTPUT_FORMAT Output verbosity: compact|pretty (default: compact, ~30% fewer tokens)
   CONTEXTSTREAM_CONSOLIDATED  Consolidated domain tools: true|false (default: true in v0.4.x, ~75% token reduction)
+  CONTEXTSTREAM_CONTEXT_PACK  Enable Context Pack in context_smart: true|false (default: true)
   CONTEXTSTREAM_PRO_TOOLS     Optional comma-separated PRO tool names (default: AI tools)
   CONTEXTSTREAM_UPGRADE_URL   Optional upgrade URL shown for PRO tools on Free plan
   CONTEXTSTREAM_ENABLE_PROMPTS Enable MCP prompts list (default: true)

@@ -4586,6 +4586,9 @@ Format options:
 
 Type codes: W=Workspace, P=Project, D=Decision, M=Memory, I=Insight, T=Task, L=Lesson
 
+Context Pack:
+- mode='pack' adds code context + distillation (higher credit cost)
+
 Example usage:
 1. User asks "how should I implement auth?"
 2. AI calls context_smart(user_message="how should I implement auth?")
@@ -4599,6 +4602,8 @@ This saves ~80% tokens compared to including full chat history.`,
         project_id: z.string().uuid().optional(),
         max_tokens: z.number().optional().describe('Maximum tokens for context (default: 800)'),
         format: z.enum(['minified', 'readable', 'structured']).optional().describe('Context format (default: minified)'),
+        mode: z.enum(['standard', 'pack']).optional().describe('Context pack mode (default: pack when enabled)'),
+        distill: z.boolean().optional().describe('Use distillation for context pack (default: true)'),
       }),
     },
     async (input) => {
@@ -4625,6 +4630,8 @@ This saves ~80% tokens compared to including full chat history.`,
         project_id: projectId,
         max_tokens: input.max_tokens,
         format: input.format,
+        mode: input.mode,
+        distill: input.distill,
       });
 
       // Return context directly for easy inclusion in AI prompts
