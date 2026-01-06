@@ -278,9 +278,57 @@ function getRulesNotice(folderPath: string | null, clientName?: string): RulesNo
 
 const CONTEXTSTREAM_START_MARKER = '<!-- BEGIN ContextStream -->';
 const CONTEXTSTREAM_END_MARKER = '<!-- END ContextStream -->';
+const LEGACY_CONTEXTSTREAM_HINTS = [
+  'contextstream integration',
+  'contextstream v0.4',
+  'contextstream v0.3',
+  'contextstream (standard)',
+  'contextstream (consolidated',
+  'contextstream mcp',
+  'contextstream tools',
+];
+const LEGACY_CONTEXTSTREAM_ALLOWED_HEADINGS = [
+  'contextstream',
+  'tl;dr',
+  'required every message',
+  'quick reference',
+  'tool catalog',
+  'consolidated domain tools',
+  'standalone tools',
+  'domain tools',
+  'why context_smart',
+  'recommended token budgets',
+  'rules update notices',
+  'preferences & lessons',
+  'index & graph preflight',
+  'search & code intelligence',
+  'distillation',
+  'when to capture',
+  'behavior rules',
+  'plans & tasks',
+  'complete action reference',
+];
 
 function wrapWithMarkers(content: string): string {
   return `${CONTEXTSTREAM_START_MARKER}\n${content.trim()}\n${CONTEXTSTREAM_END_MARKER}`;
+}
+
+function isLegacyContextStreamRules(content: string): boolean {
+  const lower = content.toLowerCase();
+  if (!lower.includes('contextstream')) return false;
+  if (!LEGACY_CONTEXTSTREAM_HINTS.some((hint) => lower.includes(hint))) return false;
+
+  const headingRegex = /^#{1,6}\s+(.+)$/gm;
+  let hasHeading = false;
+  let match: RegExpExecArray | null;
+  while ((match = headingRegex.exec(content)) !== null) {
+    hasHeading = true;
+    const heading = match[1].trim().toLowerCase();
+    const allowed = LEGACY_CONTEXTSTREAM_ALLOWED_HEADINGS.some((prefix) => heading.startsWith(prefix));
+    if (!allowed) return false;
+  }
+
+  return hasHeading;
 }
 
 async function upsertRuleFile(filePath: string, content: string): Promise<'created' | 'updated' | 'appended'> {
@@ -307,6 +355,11 @@ async function upsertRuleFile(filePath: string, content: string): Promise<'creat
     const after = existing.substring(endIdx + CONTEXTSTREAM_END_MARKER.length);
     const updated = before.trimEnd() + '\n\n' + wrappedContent + '\n' + after.trimStart();
     await fs.promises.writeFile(filePath, updated.trim() + '\n', 'utf8');
+    return 'updated';
+  }
+
+  if (isLegacyContextStreamRules(existing)) {
+    await fs.promises.writeFile(filePath, wrappedContent + '\n', 'utf8');
     return 'updated';
   }
 
