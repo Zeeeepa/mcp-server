@@ -5917,7 +5917,7 @@ Use this to remove a reminder that is no longer relevant.`,
           })).optional(),
           // Task-specific params
           task_id: z.string().uuid().optional().describe('Task ID for get_task/update_task/delete_task'),
-          plan_id: z.string().uuid().optional().describe('Plan ID: for create_task (link to plan), update_task (link/unlink from plan), list_tasks (filter by plan)'),
+          plan_id: z.string().uuid().nullable().optional().describe('Plan ID: for create_task (link to plan), update_task (set UUID to link, null to unlink), list_tasks (filter by plan)'),
           plan_step_id: z.string().optional().describe('Which plan step this task implements'),
           description: z.string().optional().describe('Description for task'),
           task_status: z.enum(['pending', 'in_progress', 'completed', 'blocked', 'cancelled']).optional().describe('Task status'),
