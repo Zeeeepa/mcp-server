@@ -3017,6 +3017,8 @@ Access: Free`,
     limit?: number;
     offset?: number;
     content_max_chars?: number;
+    context_lines?: number;
+    exact_match_boost?: number;
   }) {
     const limit =
       typeof input.limit === 'number' && input.limit > 0
@@ -3027,6 +3029,14 @@ Access: Free`,
       typeof input.content_max_chars === 'number' && input.content_max_chars > 0
         ? Math.max(50, Math.min(Math.floor(input.content_max_chars), 10000))
         : DEFAULT_SEARCH_CONTENT_MAX_CHARS;
+    const contextLines =
+      typeof input.context_lines === 'number' && input.context_lines >= 0
+        ? Math.min(Math.floor(input.context_lines), 10)
+        : undefined;
+    const exactMatchBoost =
+      typeof input.exact_match_boost === 'number' && input.exact_match_boost >= 1
+        ? Math.min(input.exact_match_boost, 10)
+        : undefined;
     return {
       query: input.query,
       workspace_id: resolveWorkspaceId(input.workspace_id),
@@ -3034,6 +3044,8 @@ Access: Free`,
       limit,
       offset,
       content_max_chars: contentMax,
+      context_lines: contextLines,
+      exact_match_boost: exactMatchBoost,
     };
   }
 
@@ -6243,6 +6255,8 @@ Use this to remove a reminder that is no longer relevant.`,
           limit: z.number().optional().describe('Max results to return (default: 3)'),
           offset: z.number().optional().describe('Offset for pagination'),
           content_max_chars: z.number().optional().describe('Max chars per result content (default: 400)'),
+          context_lines: z.number().min(0).max(10).optional().describe('Lines of context around matches (like grep -C)'),
+          exact_match_boost: z.number().min(1).max(10).optional().describe('Boost factor for exact matches (default: 2.0)'),
         }),
       },
       async (input) => {

@@ -326,6 +326,7 @@ export class ContextStreamClient {
   }
 
   // Search - each method adds required search_type and filters fields
+  // Optional params: context_lines (like grep -C), exact_match_boost (boost for exact matches)
   searchSemantic(body: {
     query: string;
     workspace_id?: string;
@@ -333,13 +334,15 @@ export class ContextStreamClient {
     limit?: number;
     offset?: number;
     content_max_chars?: number;
+    context_lines?: number;
+    exact_match_boost?: number;
   }) {
-    return request(this.config, '/search/semantic', { 
-      body: { 
-        ...this.withDefaults(body), 
+    return request(this.config, '/search/semantic', {
+      body: {
+        ...this.withDefaults(body),
         search_type: 'semantic',
         filters: body.workspace_id ? {} : { file_types: [], languages: [], file_paths: [], exclude_paths: [], content_types: [], tags: [] }
-      } 
+      }
     });
   }
 
@@ -350,13 +353,15 @@ export class ContextStreamClient {
     limit?: number;
     offset?: number;
     content_max_chars?: number;
+    context_lines?: number;
+    exact_match_boost?: number;
   }) {
-    return request(this.config, '/search/hybrid', { 
-      body: { 
-        ...this.withDefaults(body), 
+    return request(this.config, '/search/hybrid', {
+      body: {
+        ...this.withDefaults(body),
         search_type: 'hybrid',
         filters: body.workspace_id ? {} : { file_types: [], languages: [], file_paths: [], exclude_paths: [], content_types: [], tags: [] }
-      } 
+      }
     });
   }
 
@@ -367,13 +372,15 @@ export class ContextStreamClient {
     limit?: number;
     offset?: number;
     content_max_chars?: number;
+    context_lines?: number;
+    exact_match_boost?: number;
   }) {
-    return request(this.config, '/search/keyword', { 
-      body: { 
-        ...this.withDefaults(body), 
+    return request(this.config, '/search/keyword', {
+      body: {
+        ...this.withDefaults(body),
         search_type: 'keyword',
         filters: body.workspace_id ? {} : { file_types: [], languages: [], file_paths: [], exclude_paths: [], content_types: [], tags: [] }
-      } 
+      }
     });
   }
 
@@ -384,6 +391,8 @@ export class ContextStreamClient {
     limit?: number;
     offset?: number;
     content_max_chars?: number;
+    context_lines?: number;
+    exact_match_boost?: number;
   }) {
     return request(this.config, '/search/pattern', {
       body: {
@@ -406,6 +415,8 @@ export class ContextStreamClient {
     limit?: number;
     offset?: number;
     content_max_chars?: number;
+    context_lines?: number;
+    exact_match_boost?: number;
   }) {
     return request(this.config, '/search/exhaustive', {
       body: {
