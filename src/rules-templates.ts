@@ -157,7 +157,7 @@ Only after this preflight, proceed with search/analysis below.
 
 ### Search & Code Intelligence (ContextStream-first)
 
-⚠️ **STOP: Before using Glob/Grep/Read/Explore** → Call \`search(mode="hybrid")\` FIRST. Use local tools ONLY if ContextStream returns 0 results.
+⚠️ **STOP: Before using Search/Glob/Grep/Read/Explore** → Call \`search(mode="hybrid")\` FIRST. Use local tools ONLY if ContextStream returns 0 results.
 
 **Search order:**
 1. \`session(action="smart_search", query="...")\` - context-enriched
@@ -280,7 +280,7 @@ Rules Version: ${RULES_VERSION}
 
 ### Behavior Rules
 
-⚠️ **STOP: Before using Glob/Grep/Read/Explore** → Call \`search(mode="hybrid")\` FIRST. Use local tools ONLY if ContextStream returns 0 results.
+⚠️ **STOP: Before using Search/Glob/Grep/Read/Explore** → Call \`search(mode="hybrid")\` FIRST. Use local tools ONLY if ContextStream returns 0 results.
 
 - **First message**: Call \`session_init\` with context_hint, then call \`context_smart\` before any other tool or response
 - **On [INGEST_RECOMMENDED]**: Ask the user if they want to enable semantic code search. Explain: "Indexing your codebase enables AI-powered code search, dependency analysis, and better context. This takes a few minutes." If user agrees, run the provided \`project(action="ingest_local")\` command.
