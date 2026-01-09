@@ -6248,11 +6248,11 @@ Use this to remove a reminder that is no longer relevant.`,
       'search',
       {
         title: 'Search',
-        description: `Search workspace memory and knowledge. Modes: semantic (meaning-based), hybrid (semantic + keyword), keyword (exact match), pattern (regex), exhaustive (all matches like grep).
+        description: `Search workspace memory and knowledge. Modes: semantic (meaning-based), hybrid (semantic + keyword), keyword (exact match), pattern (regex), exhaustive (all matches like grep), refactor (word-boundary matching for symbol renaming).
 
 Output formats: full (default, includes content), paths (file paths only - 80% token savings), minimal (compact - 60% savings), count (match counts only - 90% savings).`,
         inputSchema: z.object({
-          mode: z.enum(['semantic', 'hybrid', 'keyword', 'pattern', 'exhaustive']).describe('Search mode'),
+          mode: z.enum(['semantic', 'hybrid', 'keyword', 'pattern', 'exhaustive', 'refactor']).describe('Search mode'),
           query: z.string().describe('Search query'),
           workspace_id: z.string().uuid().optional(),
           project_id: z.string().uuid().optional(),
@@ -6283,6 +6283,9 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
             break;
           case 'exhaustive':
             result = await client.searchExhaustive(params);
+            break;
+          case 'refactor':
+            result = await client.searchRefactor(params);
             break;
         }
 

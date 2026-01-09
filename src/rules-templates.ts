@@ -185,7 +185,8 @@ search(mode="hybrid", query="function implementation") → done (results include
 | Find code by meaning | \`hybrid\` | "authentication logic", "error handling" |
 | Exact string/symbol | \`keyword\` | "UserAuthService", "API_KEY" |
 | File patterns | \`pattern\` | "*.sql", "test_*.py" |
-| ALL matches (refactoring) | \`exhaustive\` | "oldFunctionName" (rename across codebase) |
+| ALL matches (grep-like) | \`exhaustive\` | "TODO", "FIXME" (find all occurrences) |
+| Symbol renaming | \`refactor\` | "oldFunctionName" (word-boundary matching) |
 | Conceptual search | \`semantic\` | "how does caching work" |
 
 **Token Efficiency:** Use \`output_format\` to reduce response size:
@@ -341,7 +342,8 @@ search(mode="hybrid", query="function implementation") → done (results include
 | Find code by meaning | \`hybrid\` | "authentication logic", "error handling" |
 | Exact string/symbol | \`keyword\` | "UserAuthService", "API_KEY" |
 | File patterns | \`pattern\` | "*.sql", "test_*.py" |
-| ALL matches (refactoring) | \`exhaustive\` | "oldFunctionName" (rename across codebase) |
+| ALL matches (grep-like) | \`exhaustive\` | "TODO", "FIXME" (find all occurrences) |
+| Symbol renaming | \`refactor\` | "oldFunctionName" (word-boundary matching) |
 | Conceptual search | \`semantic\` | "how does caching work" |
 
 ### Token Efficiency

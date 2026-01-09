@@ -437,6 +437,31 @@ export class ContextStreamClient {
     });
   }
 
+  /**
+   * Refactor search optimized for find-replace operations.
+   * Uses word-boundary matching for precise symbol renaming.
+   * Returns matches grouped by file with line/col positions.
+   */
+  searchRefactor(body: {
+    query: string;
+    workspace_id?: string;
+    project_id?: string;
+    limit?: number;
+    offset?: number;
+    content_max_chars?: number;
+    context_lines?: number;
+    output_format?: 'full' | 'paths' | 'minimal' | 'count';
+  }) {
+    return request(this.config, '/search/refactor', {
+      body: {
+        ...this.withDefaults(body),
+        search_type: 'refactor',
+        output_format: body.output_format,
+        filters: body.workspace_id ? {} : { file_types: [], languages: [], file_paths: [], exclude_paths: [], content_types: [], tags: [] }
+      }
+    });
+  }
+
   // Memory / Knowledge
   createMemoryEvent(body: {
     workspace_id?: string;
