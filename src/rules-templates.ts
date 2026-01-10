@@ -206,6 +206,11 @@ search(mode="hybrid", query="function implementation") → done (results include
 - \`minimal\`: Compact format (60% savings) - use for refactoring
 - \`count\`: Match counts only (90% savings) - use for quick checks
 
+**When to use \`output_format=count\`:**
+- User asks "how many X" or "count of X" → \`search(..., output_format="count")\`
+- Checking if something exists → count > 0 is sufficient
+- Large exhaustive searches → get count first, then fetch if needed
+
 **Search defaults:** \`search\` returns the top 3 results with compact snippets. Use \`limit\` + \`offset\` for pagination, and \`content_max_chars\` to expand snippets when needed.
 
 If ContextStream returns results, stop and use them. NEVER use local Search/Explore/Read unless you need exact code edits or ContextStream returned 0 results.
@@ -375,6 +380,14 @@ Use \`output_format\` to reduce response size:
 - \`paths\`: File paths only (80% token savings) - use for file listings
 - \`minimal\`: Compact format (60% savings) - use for refactoring
 - \`count\`: Match counts only (90% savings) - use for quick checks
+
+**When to use \`output_format=count\`:**
+- User asks "how many X" or "count of X" → \`search(..., output_format="count")\`
+- Checking if something exists → count > 0 is sufficient
+- Large exhaustive searches → get count first, then fetch if needed
+
+**Example:** User asks "how many TODO comments?" →
+\`search(mode="exhaustive", query="TODO", output_format="count")\` returns \`{total: 47}\` (not 47 full results)
 
 ### Plans & Tasks
 
