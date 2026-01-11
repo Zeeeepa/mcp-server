@@ -1,4 +1,4 @@
-declare module '@modelcontextprotocol/sdk/server/mcp.js' {
+declare module "@modelcontextprotocol/sdk/server/mcp.js" {
   export class ResourceTemplate {
     constructor(uriTemplate: string, options?: unknown);
   }
@@ -7,10 +7,18 @@ declare module '@modelcontextprotocol/sdk/server/mcp.js' {
     constructor(info: { name: string; version: string });
 
     // Prompts
-    registerPrompt(name: string, config: unknown, cb: (...args: any[]) => Promise<unknown> | unknown): unknown;
+    registerPrompt(
+      name: string,
+      config: unknown,
+      cb: (...args: any[]) => Promise<unknown> | unknown
+    ): unknown;
 
     // Tools
-    registerTool(name: string, config: unknown, handler: (input: any) => Promise<any> | any): unknown;
+    registerTool(
+      name: string,
+      config: unknown,
+      handler: (input: any) => Promise<any> | any
+    ): unknown;
 
     // Resources
     registerResource(
@@ -28,9 +36,8 @@ declare module '@modelcontextprotocol/sdk/server/mcp.js' {
   }
 }
 
-declare module '@modelcontextprotocol/sdk/server/stdio.js' {
+declare module "@modelcontextprotocol/sdk/server/stdio.js" {
   export class StdioServerTransport {
     constructor();
   }
 }
-

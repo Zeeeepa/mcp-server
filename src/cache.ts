@@ -1,6 +1,6 @@
 /**
  * Simple in-memory cache with TTL support for MCP client.
- * 
+ *
  * This reduces HTTP roundtrips for frequently accessed data like:
  * - Workspace info (rarely changes)
  * - Project info (rarely changes)
@@ -29,12 +29,12 @@ export class MemoryCache {
   get<T>(key: string): T | undefined {
     const entry = this.cache.get(key) as CacheEntry<T> | undefined;
     if (!entry) return undefined;
-    
+
     if (Date.now() > entry.expiresAt) {
       this.cache.delete(key);
       return undefined;
     }
-    
+
     return entry.value;
   }
 
@@ -104,19 +104,19 @@ export class MemoryCache {
 export const CacheTTL = {
   // Workspace info rarely changes - cache for 5 minutes
   WORKSPACE: 5 * 60 * 1000,
-  
+
   // Project info rarely changes - cache for 5 minutes
   PROJECT: 5 * 60 * 1000,
-  
+
   // Session init context - cache for 60 seconds
   SESSION_INIT: 60 * 1000,
-  
+
   // Memory events - cache for 30 seconds (they change more often)
   MEMORY_EVENTS: 30 * 1000,
-  
+
   // Search results - cache for 60 seconds
   SEARCH: 60 * 1000,
-  
+
   // User preferences - cache for 5 minutes
   USER_PREFS: 5 * 60 * 1000,
 
@@ -130,12 +130,11 @@ export const CacheKeys = {
   workspaceList: (userId: string) => `workspaces:${userId}`,
   project: (id: string) => `project:${id}`,
   projectList: (workspaceId: string) => `projects:${workspaceId}`,
-  sessionInit: (workspaceId?: string, projectId?: string) => 
-    `session_init:${workspaceId || ''}:${projectId || ''}`,
+  sessionInit: (workspaceId?: string, projectId?: string) =>
+    `session_init:${workspaceId || ""}:${projectId || ""}`,
   memoryEvents: (workspaceId: string) => `memory:${workspaceId}`,
-  search: (query: string, workspaceId?: string) => 
-    `search:${workspaceId || ''}:${query}`,
-  creditBalance: () => 'credits:balance',
+  search: (query: string, workspaceId?: string) => `search:${workspaceId || ""}:${query}`,
+  creditBalance: () => "credits:balance",
 } as const;
 
 // Global cache instance

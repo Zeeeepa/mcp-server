@@ -1,47 +1,48 @@
-import { randomUUID } from 'node:crypto';
-import * as path from 'node:path';
-import { z } from 'zod';
-import type { Config } from './config.js';
-import { request, HttpError } from './http.js';
-import { readFilesFromDirectory, readAllFilesInBatches, readChangedFilesInBatches } from './files.js';
+import { randomUUID } from "node:crypto";
+import * as path from "node:path";
+import { z } from "zod";
+import type { Config } from "./config.js";
+import { request, HttpError } from "./http.js";
+import { readAllFilesInBatches, readChangedFilesInBatches } from "./files.js";
 import {
   resolveWorkspace,
   readLocalConfig,
   writeLocalConfig,
   addGlobalMapping,
-  type WorkspaceConfig
-} from './workspace-config.js';
-import { globalCache, CacheKeys, CacheTTL } from './cache.js';
-import { VERSION, getUpdateNotice, type VersionNotice } from './version.js';
+} from "./workspace-config.js";
+import { globalCache, CacheKeys, CacheTTL } from "./cache.js";
+import { VERSION, getUpdateNotice, type VersionNotice } from "./version.js";
 
 const uuidSchema = z.string().uuid();
 
 function unwrapApiResponse<T>(result: unknown): T {
-  if (!result || typeof result !== 'object') return result as T;
+  if (!result || typeof result !== "object") return result as T;
   const maybe = result as any;
-  if (typeof maybe.success === 'boolean' && 'data' in maybe) {
+  if (typeof maybe.success === "boolean" && "data" in maybe) {
     return maybe.data as T;
   }
   return result as T;
 }
 
 function normalizeNodeType(input: string): string {
-  const t = String(input ?? '').trim().toLowerCase();
+  const t = String(input ?? "")
+    .trim()
+    .toLowerCase();
   switch (t) {
-    case 'fact':
-    case 'insight':
-    case 'note':
-      return 'Fact';
-    case 'decision':
-      return 'Decision';
-    case 'preference':
-      return 'Preference';
-    case 'constraint':
-      return 'Constraint';
-    case 'habit':
-      return 'Habit';
-    case 'lesson':
-      return 'Lesson';
+    case "fact":
+    case "insight":
+    case "note":
+      return "Fact";
+    case "decision":
+      return "Decision";
+    case "preference":
+      return "Preference";
+    case "constraint":
+      return "Constraint";
+    case "habit":
+      return "Habit";
+    case "lesson":
+      return "Lesson";
     default:
       throw new Error(
         `Invalid node_type: ${JSON.stringify(input)} (expected one of fact|decision|preference|constraint|habit|lesson)`
@@ -49,10 +50,10 @@ function normalizeNodeType(input: string): string {
   }
 }
 
-type GraphTier = 'none' | 'lite' | 'full';
+type GraphTier = "none" | "lite" | "full";
 
 function pickString(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
+  if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
 }
@@ -60,9 +61,22 @@ function pickString(value: unknown): string | null {
 function normalizeGraphTier(value: string): GraphTier | null {
   const normalized = value.trim().toLowerCase();
   if (!normalized) return null;
-  if (normalized.includes('full') || normalized.includes('elite') || normalized.includes('team')) return 'full';
-  if (normalized.includes('lite') || normalized.includes('light') || normalized.includes('basic') || normalized.includes('module')) return 'lite';
-  if (normalized.includes('none') || normalized.includes('off') || normalized.includes('disabled') || normalized.includes('free')) return 'none';
+  if (normalized.includes("full") || normalized.includes("elite") || normalized.includes("team"))
+    return "full";
+  if (
+    normalized.includes("lite") ||
+    normalized.includes("light") ||
+    normalized.includes("basic") ||
+    normalized.includes("module")
+  )
+    return "lite";
+  if (
+    normalized.includes("none") ||
+    normalized.includes("off") ||
+    normalized.includes("disabled") ||
+    normalized.includes("free")
+  )
+    return "none";
   return null;
 }
 
@@ -71,15 +85,15 @@ const AI_PLAN_RETRIES = 0;
 
 // Ingest recommendation benefits - shown when prompting user to ingest
 const INGEST_BENEFITS = [
-  'Enable semantic code search across your entire codebase',
-  'Get AI-powered code understanding and context for your questions',
-  'Unlock dependency analysis and impact assessment',
-  'Allow the AI assistant to find relevant code without manual file navigation',
-  'Build a searchable knowledge base of your codebase structure',
+  "Enable semantic code search across your entire codebase",
+  "Get AI-powered code understanding and context for your questions",
+  "Unlock dependency analysis and impact assessment",
+  "Allow the AI assistant to find relevant code without manual file navigation",
+  "Build a searchable knowledge base of your codebase structure",
 ];
 
 // Ingest recommendation status types
-type IngestStatus = 'not_indexed' | 'indexed' | 'stale' | 'recently_indexed' | 'auto_started';
+type IngestStatus = "not_indexed" | "indexed" | "stale" | "recently_indexed" | "auto_started";
 
 interface IngestRecommendation {
   recommended: boolean;
@@ -127,9 +141,7 @@ export class ContextStreamClient {
     }
   }
 
-  private withDefaults<T extends { workspace_id?: string; project_id?: string }>(
-    input: T
-  ): T {
+  private withDefaults<T extends { workspace_id?: string; project_id?: string }>(input: T): T {
     const { defaultWorkspaceId, defaultProjectId } = this.config;
     const providedWorkspaceId = this.coerceUuid(input.workspace_id);
     const workspaceId = providedWorkspaceId || defaultWorkspaceId;
@@ -139,8 +151,8 @@ export class ContextStreamClient {
     // 2. workspace_id matches defaultWorkspaceId (or both are undefined)
     // This prevents using a cached project_id that belongs to a different workspace
     const providedProjectId = this.coerceUuid(input.project_id);
-    const useDefaultProject = !providedProjectId &&
-      (!providedWorkspaceId || providedWorkspaceId === defaultWorkspaceId);
+    const useDefaultProject =
+      !providedProjectId && (!providedWorkspaceId || providedWorkspaceId === defaultWorkspaceId);
 
     return {
       ...input,
@@ -160,7 +172,7 @@ export class ContextStreamClient {
   }
 
   private requireNonEmpty(value: unknown, field: string, tool: string): string {
-    const text = String(value ?? '').trim();
+    const text = String(value ?? "").trim();
     if (!text) {
       throw new HttpError(400, `${field} is required for ${tool}`);
     }
@@ -169,26 +181,26 @@ export class ContextStreamClient {
 
   private isBadRequestDeserialization(error: unknown): boolean {
     if (!(error instanceof HttpError)) return false;
-    if (String(error.code || '').toUpperCase() !== 'BAD_REQUEST') return false;
-    const message = String(error.message || '').toLowerCase();
-    return message.includes('deserialize') || message.includes('deserial');
+    if (String(error.code || "").toUpperCase() !== "BAD_REQUEST") return false;
+    const message = String(error.message || "").toLowerCase();
+    return message.includes("deserialize") || message.includes("deserial");
   }
 
   // Auth
   me() {
-    return request(this.config, '/auth/me');
+    return request(this.config, "/auth/me");
   }
 
   startDeviceLogin() {
-    return request(this.config, '/auth/device/start', { method: 'POST' });
+    return request(this.config, "/auth/device/start", { method: "POST" });
   }
 
   pollDeviceLogin(input: { device_code: string }) {
-    return request(this.config, '/auth/device/token', { body: input });
+    return request(this.config, "/auth/device/token", { body: input });
   }
 
   createApiKey(input: { name: string; permissions?: string[]; expires_at?: string | null }) {
-    return request(this.config, '/auth/api-keys', { body: input });
+    return request(this.config, "/auth/api-keys", { body: input });
   }
 
   // Credits / Billing (used for plan gating)
@@ -197,8 +209,11 @@ export class ContextStreamClient {
     const cached = globalCache.get(cacheKey);
     if (cached) return cached;
 
-    const result = await request(this.config, '/credits/balance', { method: 'GET' }) as any;
-    const data = result && typeof result === 'object' && 'data' in result && (result as any).data ? (result as any).data : result;
+    const result = (await request(this.config, "/credits/balance", { method: "GET" })) as any;
+    const data =
+      result && typeof result === "object" && "data" in result && (result as any).data
+        ? (result as any).data
+        : result;
 
     globalCache.set(cacheKey, data, CacheTTL.CREDIT_BALANCE);
     return data;
@@ -208,7 +223,7 @@ export class ContextStreamClient {
     try {
       const balance = await this.getCreditBalance();
       const planName = balance?.plan?.name;
-      return typeof planName === 'string' ? planName.toLowerCase() : null;
+      return typeof planName === "string" ? planName.toLowerCase() : null;
     } catch {
       return null;
     }
@@ -232,31 +247,31 @@ export class ContextStreamClient {
       if (normalizedTier) return normalizedTier;
 
       const planName = pickString(plan.name)?.toLowerCase() ?? null;
-      if (!planName) return 'none';
+      if (!planName) return "none";
 
       if (
-        planName.includes('elite') ||
-        planName.includes('team') ||
-        planName.includes('enterprise') ||
-        planName.includes('business')
+        planName.includes("elite") ||
+        planName.includes("team") ||
+        planName.includes("enterprise") ||
+        planName.includes("business")
       ) {
-        return 'full';
+        return "full";
       }
-      if (planName.includes('pro')) return 'lite';
-      if (planName.includes('free')) return 'none';
+      if (planName.includes("pro")) return "lite";
+      if (planName.includes("free")) return "none";
 
-      return 'lite';
+      return "lite";
     } catch {
-      return 'none';
+      return "none";
     }
   }
 
   // Workspaces & Projects
   listWorkspaces(params?: { page?: number; page_size?: number }) {
     const query = new URLSearchParams();
-    if (params?.page) query.set('page', String(params.page));
-    if (params?.page_size) query.set('page_size', String(params.page_size));
-    const suffix = query.toString() ? `?${query.toString()}` : '';
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.page_size) query.set("page_size", String(params.page_size));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
     return request(this.config, `/workspaces${suffix}`);
   }
 
@@ -264,13 +279,19 @@ export class ContextStreamClient {
     input: { name: string; description?: string; visibility?: string },
     options?: { unwrap?: boolean }
   ) {
-    const result = await request(this.config, '/workspaces', { body: input });
+    const result = await request(this.config, "/workspaces", { body: input });
     return options?.unwrap === false ? result : unwrapApiResponse(result);
   }
 
-  async updateWorkspace(workspaceId: string, input: { name?: string; description?: string; visibility?: string }) {
+  async updateWorkspace(
+    workspaceId: string,
+    input: { name?: string; description?: string; visibility?: string }
+  ) {
     uuidSchema.parse(workspaceId);
-    const result = await request(this.config, `/workspaces/${workspaceId}`, { method: 'PUT', body: input });
+    const result = await request(this.config, `/workspaces/${workspaceId}`, {
+      method: "PUT",
+      body: input,
+    });
     // Invalidate caches so subsequent reads reflect updates.
     globalCache.delete(CacheKeys.workspace(workspaceId));
     globalCache.delete(`workspace_overview:${workspaceId}`);
@@ -279,7 +300,7 @@ export class ContextStreamClient {
 
   async deleteWorkspace(workspaceId: string) {
     uuidSchema.parse(workspaceId);
-    const result = await request(this.config, `/workspaces/${workspaceId}`, { method: 'DELETE' });
+    const result = await request(this.config, `/workspaces/${workspaceId}`, { method: "DELETE" });
     globalCache.delete(CacheKeys.workspace(workspaceId));
     globalCache.delete(`workspace_overview:${workspaceId}`);
     return result;
@@ -288,10 +309,10 @@ export class ContextStreamClient {
   listProjects(params?: { workspace_id?: string; page?: number; page_size?: number }) {
     const withDefaults = this.withDefaults(params || {});
     const query = new URLSearchParams();
-    if (withDefaults.workspace_id) query.set('workspace_id', withDefaults.workspace_id);
-    if (params?.page) query.set('page', String(params.page));
-    if (params?.page_size) query.set('page_size', String(params.page_size));
-    const suffix = query.toString() ? `?${query.toString()}` : '';
+    if (withDefaults.workspace_id) query.set("workspace_id", withDefaults.workspace_id);
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.page_size) query.set("page_size", String(params.page_size));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
     return request(this.config, `/projects${suffix}`);
   }
 
@@ -300,13 +321,16 @@ export class ContextStreamClient {
     options?: { unwrap?: boolean }
   ) {
     const payload = this.withDefaults(input);
-    const result = await request(this.config, '/projects', { body: payload });
+    const result = await request(this.config, "/projects", { body: payload });
     return options?.unwrap === false ? result : unwrapApiResponse(result);
   }
 
   async updateProject(projectId: string, input: { name?: string; description?: string }) {
     uuidSchema.parse(projectId);
-    const result = await request(this.config, `/projects/${projectId}`, { method: 'PUT', body: input });
+    const result = await request(this.config, `/projects/${projectId}`, {
+      method: "PUT",
+      body: input,
+    });
     globalCache.delete(CacheKeys.project(projectId));
     globalCache.delete(`project_overview:${projectId}`);
     return result;
@@ -314,7 +338,7 @@ export class ContextStreamClient {
 
   async deleteProject(projectId: string) {
     uuidSchema.parse(projectId);
-    const result = await request(this.config, `/projects/${projectId}`, { method: 'DELETE' });
+    const result = await request(this.config, `/projects/${projectId}`, { method: "DELETE" });
     globalCache.delete(CacheKeys.project(projectId));
     globalCache.delete(`project_overview:${projectId}`);
     return result;
@@ -336,15 +360,24 @@ export class ContextStreamClient {
     content_max_chars?: number;
     context_lines?: number;
     exact_match_boost?: number;
-    output_format?: 'full' | 'paths' | 'minimal' | 'count';
+    output_format?: "full" | "paths" | "minimal" | "count";
   }) {
-    return request(this.config, '/search/semantic', {
+    return request(this.config, "/search/semantic", {
       body: {
         ...this.withDefaults(body),
-        search_type: 'semantic',
+        search_type: "semantic",
         output_format: body.output_format,
-        filters: body.workspace_id ? {} : { file_types: [], languages: [], file_paths: [], exclude_paths: [], content_types: [], tags: [] }
-      }
+        filters: body.workspace_id
+          ? {}
+          : {
+              file_types: [],
+              languages: [],
+              file_paths: [],
+              exclude_paths: [],
+              content_types: [],
+              tags: [],
+            },
+      },
     });
   }
 
@@ -357,15 +390,24 @@ export class ContextStreamClient {
     content_max_chars?: number;
     context_lines?: number;
     exact_match_boost?: number;
-    output_format?: 'full' | 'paths' | 'minimal' | 'count';
+    output_format?: "full" | "paths" | "minimal" | "count";
   }) {
-    return request(this.config, '/search/hybrid', {
+    return request(this.config, "/search/hybrid", {
       body: {
         ...this.withDefaults(body),
-        search_type: 'hybrid',
+        search_type: "hybrid",
         output_format: body.output_format,
-        filters: body.workspace_id ? {} : { file_types: [], languages: [], file_paths: [], exclude_paths: [], content_types: [], tags: [] }
-      }
+        filters: body.workspace_id
+          ? {}
+          : {
+              file_types: [],
+              languages: [],
+              file_paths: [],
+              exclude_paths: [],
+              content_types: [],
+              tags: [],
+            },
+      },
     });
   }
 
@@ -378,15 +420,24 @@ export class ContextStreamClient {
     content_max_chars?: number;
     context_lines?: number;
     exact_match_boost?: number;
-    output_format?: 'full' | 'paths' | 'minimal' | 'count';
+    output_format?: "full" | "paths" | "minimal" | "count";
   }) {
-    return request(this.config, '/search/keyword', {
+    return request(this.config, "/search/keyword", {
       body: {
         ...this.withDefaults(body),
-        search_type: 'keyword',
+        search_type: "keyword",
         output_format: body.output_format,
-        filters: body.workspace_id ? {} : { file_types: [], languages: [], file_paths: [], exclude_paths: [], content_types: [], tags: [] }
-      }
+        filters: body.workspace_id
+          ? {}
+          : {
+              file_types: [],
+              languages: [],
+              file_paths: [],
+              exclude_paths: [],
+              content_types: [],
+              tags: [],
+            },
+      },
     });
   }
 
@@ -399,15 +450,24 @@ export class ContextStreamClient {
     content_max_chars?: number;
     context_lines?: number;
     exact_match_boost?: number;
-    output_format?: 'full' | 'paths' | 'minimal' | 'count';
+    output_format?: "full" | "paths" | "minimal" | "count";
   }) {
-    return request(this.config, '/search/pattern', {
+    return request(this.config, "/search/pattern", {
       body: {
         ...this.withDefaults(body),
-        search_type: 'pattern',
+        search_type: "pattern",
         output_format: body.output_format,
-        filters: body.workspace_id ? {} : { file_types: [], languages: [], file_paths: [], exclude_paths: [], content_types: [], tags: [] }
-      }
+        filters: body.workspace_id
+          ? {}
+          : {
+              file_types: [],
+              languages: [],
+              file_paths: [],
+              exclude_paths: [],
+              content_types: [],
+              tags: [],
+            },
+      },
     });
   }
 
@@ -425,15 +485,24 @@ export class ContextStreamClient {
     content_max_chars?: number;
     context_lines?: number;
     exact_match_boost?: number;
-    output_format?: 'full' | 'paths' | 'minimal' | 'count';
+    output_format?: "full" | "paths" | "minimal" | "count";
   }) {
-    return request(this.config, '/search/exhaustive', {
+    return request(this.config, "/search/exhaustive", {
       body: {
         ...this.withDefaults(body),
-        search_type: 'exhaustive',
+        search_type: "exhaustive",
         output_format: body.output_format,
-        filters: body.workspace_id ? {} : { file_types: [], languages: [], file_paths: [], exclude_paths: [], content_types: [], tags: [] }
-      }
+        filters: body.workspace_id
+          ? {}
+          : {
+              file_types: [],
+              languages: [],
+              file_paths: [],
+              exclude_paths: [],
+              content_types: [],
+              tags: [],
+            },
+      },
     });
   }
 
@@ -450,15 +519,24 @@ export class ContextStreamClient {
     offset?: number;
     content_max_chars?: number;
     context_lines?: number;
-    output_format?: 'full' | 'paths' | 'minimal' | 'count';
+    output_format?: "full" | "paths" | "minimal" | "count";
   }) {
-    return request(this.config, '/search/refactor', {
+    return request(this.config, "/search/refactor", {
       body: {
         ...this.withDefaults(body),
-        search_type: 'refactor',
+        search_type: "refactor",
         output_format: body.output_format,
-        filters: body.workspace_id ? {} : { file_types: [], languages: [], file_paths: [], exclude_paths: [], content_types: [], tags: [] }
-      }
+        filters: body.workspace_id
+          ? {}
+          : {
+              file_types: [],
+              languages: [],
+              file_paths: [],
+              exclude_paths: [],
+              content_types: [],
+              tags: [],
+            },
+      },
     });
   }
 
@@ -474,34 +552,38 @@ export class ContextStreamClient {
     code_refs?: Array<{ file_path: string; symbol_id?: string; symbol_name?: string }>;
   }) {
     const withDefaults = this.withDefaults(body);
-    
+
     // Validate required fields
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for creating memory events. Set defaultWorkspaceId in config or provide workspace_id.');
+      throw new Error(
+        "workspace_id is required for creating memory events. Set defaultWorkspaceId in config or provide workspace_id."
+      );
     }
-    
+
     // Ensure content is not empty
     if (!body.content || body.content.trim().length === 0) {
-      throw new Error('content is required and cannot be empty');
+      throw new Error("content is required and cannot be empty");
     }
-    
-    return request(this.config, '/memory/events', { body: withDefaults });
+
+    return request(this.config, "/memory/events", { body: withDefaults });
   }
 
   bulkIngestEvents(body: { workspace_id?: string; project_id?: string; events: any[] }) {
-    return request(this.config, '/memory/events/ingest', { body: this.withDefaults(body) });
+    return request(this.config, "/memory/events/ingest", { body: this.withDefaults(body) });
   }
 
   listMemoryEvents(params?: { workspace_id?: string; project_id?: string; limit?: number }) {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for listing memory events');
+      throw new Error("workspace_id is required for listing memory events");
     }
     const query = new URLSearchParams();
-    if (params?.limit) query.set('limit', String(params.limit));
-    if (withDefaults.project_id) query.set('project_id', withDefaults.project_id);
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/memory/events/workspace/${withDefaults.workspace_id}${suffix}`, { method: 'GET' });
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (withDefaults.project_id) query.set("project_id", withDefaults.project_id);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(this.config, `/memory/events/workspace/${withDefaults.workspace_id}${suffix}`, {
+      method: "GET",
+    });
   }
 
   createKnowledgeNode(body: {
@@ -514,14 +596,16 @@ export class ContextStreamClient {
   }) {
     const withDefaults = this.withDefaults(body);
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for creating knowledge nodes');
+      throw new Error("workspace_id is required for creating knowledge nodes");
     }
 
     const summary =
-      String(withDefaults.title ?? '').trim() ||
-      String(withDefaults.content ?? '').trim().slice(0, 120) ||
-      'Untitled';
-    const details = String(withDefaults.content ?? '').trim();
+      String(withDefaults.title ?? "").trim() ||
+      String(withDefaults.content ?? "")
+        .trim()
+        .slice(0, 120) ||
+      "Untitled";
+    const details = String(withDefaults.content ?? "").trim();
 
     // API expects CreateKnowledgeNodeRequest.
     const apiBody: Record<string, any> = {
@@ -538,34 +622,46 @@ export class ContextStreamClient {
       apiBody.context = { relations: withDefaults.relations };
     }
 
-    return request(this.config, '/memory/nodes', { body: apiBody });
+    return request(this.config, "/memory/nodes", { body: apiBody });
   }
 
   listKnowledgeNodes(params?: { workspace_id?: string; project_id?: string; limit?: number }) {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for listing knowledge nodes');
+      throw new Error("workspace_id is required for listing knowledge nodes");
     }
     const query = new URLSearchParams();
-    if (params?.limit) query.set('limit', String(params.limit));
-    if (withDefaults.project_id) query.set('project_id', withDefaults.project_id);
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/memory/nodes/workspace/${withDefaults.workspace_id}${suffix}`, { method: 'GET' });
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (withDefaults.project_id) query.set("project_id", withDefaults.project_id);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(this.config, `/memory/nodes/workspace/${withDefaults.workspace_id}${suffix}`, {
+      method: "GET",
+    });
   }
 
-  memorySearch(body: { query: string; workspace_id?: string; project_id?: string; limit?: number }) {
-    return request(this.config, '/memory/search', { body: this.withDefaults(body) });
+  memorySearch(body: {
+    query: string;
+    workspace_id?: string;
+    project_id?: string;
+    limit?: number;
+  }) {
+    return request(this.config, "/memory/search", { body: this.withDefaults(body) });
   }
 
-  memoryDecisions(params?: { workspace_id?: string; project_id?: string; category?: string; limit?: number }) {
+  memoryDecisions(params?: {
+    workspace_id?: string;
+    project_id?: string;
+    category?: string;
+    limit?: number;
+  }) {
     const query = new URLSearchParams();
     const withDefaults = this.withDefaults(params || {});
-    if (withDefaults.workspace_id) query.set('workspace_id', withDefaults.workspace_id);
-    if (withDefaults.project_id) query.set('project_id', withDefaults.project_id);
-    if (params?.category) query.set('category', params.category);
-    if (params?.limit) query.set('limit', String(params.limit));
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/memory/search/decisions${suffix}`, { method: 'GET' });
+    if (withDefaults.workspace_id) query.set("workspace_id", withDefaults.workspace_id);
+    if (withDefaults.project_id) query.set("project_id", withDefaults.project_id);
+    if (params?.category) query.set("category", params.category);
+    if (params?.limit) query.set("limit", String(params.limit));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(this.config, `/memory/search/decisions${suffix}`, { method: "GET" });
   }
 
   // Graph
@@ -585,7 +681,7 @@ export class ContextStreamClient {
       workspace_id: withDefaults.workspace_id,
       project_id: withDefaults.project_id,
     };
-    return request(this.config, '/graph/knowledge/related', { body: apiBody });
+    return request(this.config, "/graph/knowledge/related", { body: apiBody });
   }
 
   graphPath(body: {
@@ -607,7 +703,7 @@ export class ContextStreamClient {
       workspace_id: withDefaults.workspace_id,
       project_id: withDefaults.project_id,
     };
-    return request(this.config, '/graph/knowledge/path', { body: apiBody });
+    return request(this.config, "/graph/knowledge/path", { body: apiBody });
   }
 
   graphDecisions(body?: {
@@ -625,11 +721,11 @@ export class ContextStreamClient {
     const apiBody = {
       workspace_id: withDefaults.workspace_id,
       project_id: withDefaults.project_id,
-      category: body?.category ?? 'general',
+      category: body?.category ?? "general",
       from: body?.from ?? defaultFrom.toISOString(),
       to: body?.to ?? now.toISOString(),
     };
-    return request(this.config, '/graph/knowledge/decisions', { body: apiBody });
+    return request(this.config, "/graph/knowledge/decisions", { body: apiBody });
   }
 
   async graphDependencies(body: {
@@ -637,36 +733,36 @@ export class ContextStreamClient {
     max_depth?: number;
     include_transitive?: boolean;
   }) {
-    const rawType = String(body.target?.type ?? '').toLowerCase();
-    let targetType: 'module' | 'function' | 'type' | 'variable' = 'function';
+    const rawType = String(body.target?.type ?? "").toLowerCase();
+    let targetType: "module" | "function" | "type" | "variable" = "function";
     switch (rawType) {
-      case 'module':
-      case 'file':
-      case 'path':
-        targetType = 'module';
+      case "module":
+      case "file":
+      case "path":
+        targetType = "module";
         break;
-      case 'type':
-        targetType = 'type';
+      case "type":
+        targetType = "type";
         break;
-      case 'variable':
-      case 'var':
-      case 'const':
-        targetType = 'variable';
+      case "variable":
+      case "var":
+      case "const":
+        targetType = "variable";
         break;
-      case 'function':
-      case 'method':
-        targetType = 'function';
+      case "function":
+      case "method":
+        targetType = "function";
         break;
       default:
-        targetType = 'function';
+        targetType = "function";
     }
 
     const target =
-      targetType === 'module'
+      targetType === "module"
         ? { type: targetType, path: body.target.path ?? body.target.id }
         : { type: targetType, id: body.target.id };
 
-    return request(this.config, '/graph/dependencies', {
+    return request(this.config, "/graph/dependencies", {
       body: {
         target,
         max_depth: body.max_depth,
@@ -687,7 +783,7 @@ export class ContextStreamClient {
       to_function_id: body.to_function_id ?? body.target?.id,
       max_depth: body.max_depth,
     };
-    return request(this.config, '/graph/call-paths', { body: apiBody });
+    return request(this.config, "/graph/call-paths", { body: apiBody });
   }
 
   graphImpact(body: {
@@ -698,20 +794,20 @@ export class ContextStreamClient {
     element_name?: string;
   }) {
     const targetId = body.target_id ?? body.target?.id;
-    const elementName = body.element_name ?? body.target?.id ?? body.target?.type ?? 'unknown';
+    const elementName = body.element_name ?? body.target?.id ?? body.target?.type ?? "unknown";
     const apiBody = {
-      change_type: body.change_type ?? 'modify_signature',
+      change_type: body.change_type ?? "modify_signature",
       target_id: targetId,
       element_name: elementName,
     };
-    return request(this.config, '/graph/impact-analysis', { body: apiBody });
+    return request(this.config, "/graph/impact-analysis", { body: apiBody });
   }
 
   graphIngest(body: { project_id?: string; wait?: boolean }) {
     const withDefaults = this.withDefaults(body);
     const projectId = withDefaults.project_id;
     if (!projectId) {
-      throw new Error('project_id is required to ingest the graph.');
+      throw new Error("project_id is required to ingest the graph.");
     }
     uuidSchema.parse(projectId);
 
@@ -739,19 +835,19 @@ export class ContextStreamClient {
     };
 
     if (input.project_id) payload.project_id = input.project_id;
-    if (typeof input.max_tokens === 'number') payload.max_tokens = input.max_tokens;
-    if (typeof input.token_budget === 'number') payload.token_budget = input.token_budget;
-    if (typeof input.token_soft_limit === 'number') payload.token_soft_limit = input.token_soft_limit;
-    if (typeof input.include_dependencies === 'boolean') {
+    if (typeof input.max_tokens === "number") payload.max_tokens = input.max_tokens;
+    if (typeof input.token_budget === "number") payload.token_budget = input.token_budget;
+    if (typeof input.token_soft_limit === "number")
+      payload.token_soft_limit = input.token_soft_limit;
+    if (typeof input.include_dependencies === "boolean") {
       payload.include_dependencies = input.include_dependencies;
     }
-    if (typeof input.include_tests === 'boolean') {
+    if (typeof input.include_tests === "boolean") {
       payload.include_tests = input.include_tests;
     }
 
-    const rawLimit =
-      typeof input.max_sections === 'number' ? input.max_sections : input.limit;
-    if (typeof rawLimit === 'number' && Number.isFinite(rawLimit)) {
+    const rawLimit = typeof input.max_sections === "number" ? input.max_sections : input.limit;
+    if (typeof rawLimit === "number" && Number.isFinite(rawLimit)) {
       const bounded = Math.max(1, Math.min(20, Math.floor(rawLimit)));
       payload.max_sections = bounded;
     }
@@ -769,7 +865,7 @@ export class ContextStreamClient {
   }) {
     const requirements = input.requirements ?? input.description;
     if (!requirements || !requirements.trim()) {
-      throw new Error('description is required for ai_plan');
+      throw new Error("description is required for ai_plan");
     }
 
     const payload: Record<string, unknown> = {
@@ -777,21 +873,21 @@ export class ContextStreamClient {
     };
 
     if (input.project_id) payload.project_id = input.project_id;
-    if (typeof input.max_steps === 'number') payload.max_steps = input.max_steps;
+    if (typeof input.max_steps === "number") payload.max_steps = input.max_steps;
     if (input.context) payload.context = input.context;
     if (input.constraints) payload.constraints = input.constraints;
 
     return payload;
   }
 
-  private normalizeTaskGranularity(value?: string): 'low' | 'medium' | 'high' | undefined {
+  private normalizeTaskGranularity(value?: string): "low" | "medium" | "high" | undefined {
     if (!value) return undefined;
     const normalized = value.trim().toLowerCase();
-    if (normalized === 'low' || normalized === 'medium' || normalized === 'high') {
+    if (normalized === "low" || normalized === "medium" || normalized === "high") {
       return normalized;
     }
-    if (normalized === 'coarse' || normalized === 'broad') return 'low';
-    if (normalized === 'fine' || normalized === 'detailed') return 'high';
+    if (normalized === "coarse" || normalized === "broad") return "low";
+    if (normalized === "fine" || normalized === "detailed") return "high";
     return undefined;
   }
 
@@ -805,7 +901,7 @@ export class ContextStreamClient {
   }) {
     const plan = input.plan ?? input.description;
     if (!plan || !plan.trim()) {
-      throw new Error('description is required for ai_tasks');
+      throw new Error("description is required for ai_tasks");
     }
 
     const payload: Record<string, unknown> = {
@@ -817,8 +913,8 @@ export class ContextStreamClient {
     const granularity = this.normalizeTaskGranularity(input.granularity);
     if (granularity) payload.granularity = granularity;
 
-    if (typeof input.max_tasks === 'number') payload.max_tasks = input.max_tasks;
-    if (typeof input.include_estimates === 'boolean') {
+    if (typeof input.max_tasks === "number") payload.max_tasks = input.max_tasks;
+    if (typeof input.include_estimates === "boolean") {
       payload.include_estimates = input.include_estimates;
     }
 
@@ -835,66 +931,88 @@ export class ContextStreamClient {
     limit?: number;
   }) {
     const { query, project_id, limit, workspace_id } = this.withDefaults(body);
-    const safeQuery = this.requireNonEmpty(query, 'query', 'ai_context');
+    const safeQuery = this.requireNonEmpty(query, "query", "ai_context");
     const safeProjectId = this.coerceUuid(project_id);
-    const payload = this.buildAiContextRequest({ query: safeQuery, project_id: safeProjectId, limit });
-    return request(this.config, '/ai/context', { body: payload, workspaceId: workspace_id })
-      .catch((error) => {
+    const payload = this.buildAiContextRequest({
+      query: safeQuery,
+      project_id: safeProjectId,
+      limit,
+    });
+    return request(this.config, "/ai/context", { body: payload, workspaceId: workspace_id }).catch(
+      (error) => {
         if (this.isBadRequestDeserialization(error)) {
           const minimalPayload = this.buildAiContextRequest({ query: safeQuery });
-          return request(this.config, '/ai/context', { body: minimalPayload, workspaceId: workspace_id });
+          return request(this.config, "/ai/context", {
+            body: minimalPayload,
+            workspaceId: workspace_id,
+          });
         }
         throw error;
-      });
+      }
+    );
   }
 
   aiEmbeddings(body: { text: string }) {
-    return request(this.config, '/ai/embeddings', { body });
+    return request(this.config, "/ai/embeddings", { body });
   }
 
   aiPlan(body: { description: string; project_id?: string; complexity?: string }) {
     const { description, project_id } = this.withDefaults(body);
-    const safeDescription = this.requireNonEmpty(description, 'description', 'ai_plan');
+    const safeDescription = this.requireNonEmpty(description, "description", "ai_plan");
     const safeProjectId = this.coerceUuid(project_id);
-    const payload = this.buildAiPlanRequest({ description: safeDescription, project_id: safeProjectId });
-    const requestOptions = { body: payload, timeoutMs: AI_PLAN_TIMEOUT_MS, retries: AI_PLAN_RETRIES };
-    return request(this.config, '/ai/plan/generate', requestOptions)
-      .catch((error) => {
-        if (this.isBadRequestDeserialization(error)) {
-          const minimalPayload = this.buildAiPlanRequest({ description: safeDescription });
-          return request(this.config, '/ai/plan/generate', {
-            body: minimalPayload,
-            timeoutMs: AI_PLAN_TIMEOUT_MS,
-            retries: AI_PLAN_RETRIES,
-          });
-        }
-        if (error instanceof HttpError && error.status === 0 && /timeout/i.test(error.message)) {
-          const seconds = Math.ceil(AI_PLAN_TIMEOUT_MS / 1000);
-          throw new HttpError(
-            503,
-            `AI plan generation timed out after ${seconds} seconds. Try a shorter description, reduce max_steps, or retry later.`
-          );
-        }
-        throw error;
-      });
+    const payload = this.buildAiPlanRequest({
+      description: safeDescription,
+      project_id: safeProjectId,
+    });
+    const requestOptions = {
+      body: payload,
+      timeoutMs: AI_PLAN_TIMEOUT_MS,
+      retries: AI_PLAN_RETRIES,
+    };
+    return request(this.config, "/ai/plan/generate", requestOptions).catch((error) => {
+      if (this.isBadRequestDeserialization(error)) {
+        const minimalPayload = this.buildAiPlanRequest({ description: safeDescription });
+        return request(this.config, "/ai/plan/generate", {
+          body: minimalPayload,
+          timeoutMs: AI_PLAN_TIMEOUT_MS,
+          retries: AI_PLAN_RETRIES,
+        });
+      }
+      if (error instanceof HttpError && error.status === 0 && /timeout/i.test(error.message)) {
+        const seconds = Math.ceil(AI_PLAN_TIMEOUT_MS / 1000);
+        throw new HttpError(
+          503,
+          `AI plan generation timed out after ${seconds} seconds. Try a shorter description, reduce max_steps, or retry later.`
+        );
+      }
+      throw error;
+    });
   }
 
-  aiTasks(body: { plan_id?: string; description?: string; project_id?: string; granularity?: string }) {
+  aiTasks(body: {
+    plan_id?: string;
+    description?: string;
+    project_id?: string;
+    granularity?: string;
+  }) {
     if (!body.description && body.plan_id) {
-      throw new Error('plan_id is not supported for ai_tasks; provide description instead.');
+      throw new Error("plan_id is not supported for ai_tasks; provide description instead.");
     }
     const { description, project_id, granularity } = this.withDefaults(body);
-    const safeDescription = this.requireNonEmpty(description, 'description', 'ai_tasks');
+    const safeDescription = this.requireNonEmpty(description, "description", "ai_tasks");
     const safeProjectId = this.coerceUuid(project_id);
-    const payload = this.buildAiTasksRequest({ description: safeDescription, project_id: safeProjectId, granularity });
-    return request(this.config, '/ai/tasks/generate', { body: payload })
-      .catch((error) => {
-        if (this.isBadRequestDeserialization(error)) {
-          const minimalPayload = this.buildAiTasksRequest({ description: safeDescription });
-          return request(this.config, '/ai/tasks/generate', { body: minimalPayload });
-        }
-        throw error;
-      });
+    const payload = this.buildAiTasksRequest({
+      description: safeDescription,
+      project_id: safeProjectId,
+      granularity,
+    });
+    return request(this.config, "/ai/tasks/generate", { body: payload }).catch((error) => {
+      if (this.isBadRequestDeserialization(error)) {
+        const minimalPayload = this.buildAiTasksRequest({ description: safeDescription });
+        return request(this.config, "/ai/tasks/generate", { body: minimalPayload });
+      }
+      throw error;
+    });
   }
 
   aiEnhancedContext(body: {
@@ -907,57 +1025,66 @@ export class ContextStreamClient {
     limit?: number;
   }) {
     const { query, project_id, limit, workspace_id } = this.withDefaults(body);
-    const safeQuery = this.requireNonEmpty(query, 'query', 'ai_enhanced_context');
+    const safeQuery = this.requireNonEmpty(query, "query", "ai_enhanced_context");
     const safeProjectId = this.coerceUuid(project_id);
-    const payload = this.buildAiContextRequest({ query: safeQuery, project_id: safeProjectId, limit });
-    return request(this.config, '/ai/context/enhanced', { body: payload, workspaceId: workspace_id })
-      .catch((error) => {
-        if (this.isBadRequestDeserialization(error)) {
-          const minimalPayload = this.buildAiContextRequest({ query: safeQuery });
-          return request(this.config, '/ai/context/enhanced', { body: minimalPayload, workspaceId: workspace_id });
-        }
-        throw error;
-      });
+    const payload = this.buildAiContextRequest({
+      query: safeQuery,
+      project_id: safeProjectId,
+      limit,
+    });
+    return request(this.config, "/ai/context/enhanced", {
+      body: payload,
+      workspaceId: workspace_id,
+    }).catch((error) => {
+      if (this.isBadRequestDeserialization(error)) {
+        const minimalPayload = this.buildAiContextRequest({ query: safeQuery });
+        return request(this.config, "/ai/context/enhanced", {
+          body: minimalPayload,
+          workspaceId: workspace_id,
+        });
+      }
+      throw error;
+    });
   }
 
   // Project extended operations (with caching)
   async getProject(projectId: string) {
     uuidSchema.parse(projectId);
-    
+
     const cacheKey = CacheKeys.project(projectId);
     const cached = globalCache.get(cacheKey);
     if (cached) return cached;
-    
-    const result = await request(this.config, `/projects/${projectId}`, { method: 'GET' });
+
+    const result = await request(this.config, `/projects/${projectId}`, { method: "GET" });
     globalCache.set(cacheKey, result, CacheTTL.PROJECT);
     return result;
   }
 
   async projectOverview(projectId: string) {
     uuidSchema.parse(projectId);
-    
+
     const cacheKey = `project_overview:${projectId}`;
     const cached = globalCache.get(cacheKey);
     if (cached) return cached;
-    
-    const result = await request(this.config, `/projects/${projectId}/overview`, { method: 'GET' });
+
+    const result = await request(this.config, `/projects/${projectId}/overview`, { method: "GET" });
     globalCache.set(cacheKey, result, CacheTTL.PROJECT);
     return result;
   }
 
   projectStatistics(projectId: string) {
     uuidSchema.parse(projectId);
-    return request(this.config, `/projects/${projectId}/statistics`, { method: 'GET' });
+    return request(this.config, `/projects/${projectId}/statistics`, { method: "GET" });
   }
 
   projectFiles(projectId: string) {
     uuidSchema.parse(projectId);
-    return request(this.config, `/projects/${projectId}/files`, { method: 'GET' });
+    return request(this.config, `/projects/${projectId}/files`, { method: "GET" });
   }
 
   projectIndexStatus(projectId: string) {
     uuidSchema.parse(projectId);
-    return request(this.config, `/projects/${projectId}/index/status`, { method: 'GET' });
+    return request(this.config, `/projects/${projectId}/index/status`, { method: "GET" });
   }
 
   /**
@@ -973,7 +1100,7 @@ export class ContextStreamClient {
     folderPath?: string
   ): Promise<IngestRecommendation> {
     try {
-      const status = await this.projectIndexStatus(projectId) as {
+      const status = (await this.projectIndexStatus(projectId)) as {
         data?: {
           indexed_files?: number;
           total_files?: number;
@@ -1010,12 +1137,13 @@ export class ContextStreamClient {
         : `project(action="ingest_local", path="<your_project_path>")`;
 
       // No files indexed - definitely recommend
-      if (indexedFiles === 0 || statusDetail === 'no_files_indexed') {
+      if (indexedFiles === 0 || statusDetail === "no_files_indexed") {
         return {
           recommended: true,
-          status: 'not_indexed',
+          status: "not_indexed",
           indexed_files: 0,
-          reason: 'No files have been indexed yet. Ingesting your codebase will enable semantic search and AI-powered code understanding.',
+          reason:
+            "No files have been indexed yet. Ingesting your codebase will enable semantic search and AI-powered code understanding.",
           benefits: INGEST_BENEFITS,
           command: ingestCommand,
         };
@@ -1025,11 +1153,15 @@ export class ContextStreamClient {
       if (isStale) {
         return {
           recommended: true,
-          status: 'stale',
+          status: "stale",
           indexed_files: indexedFiles,
           last_indexed: lastUpdated,
           reason: `Index is over 24 hours old (${indexedFiles} files). Re-ingesting will capture any recent changes.`,
-          benefits: ['Capture recent code changes', 'Update dependency analysis', 'Improve search accuracy'],
+          benefits: [
+            "Capture recent code changes",
+            "Update dependency analysis",
+            "Improve search accuracy",
+          ],
           command: ingestCommand,
         };
       }
@@ -1038,7 +1170,7 @@ export class ContextStreamClient {
       if (isRecent) {
         return {
           recommended: false,
-          status: 'recently_indexed',
+          status: "recently_indexed",
           indexed_files: indexedFiles,
           last_indexed: lastUpdated,
           reason: `Project was recently indexed (${indexedFiles} files). No action needed.`,
@@ -1048,12 +1180,12 @@ export class ContextStreamClient {
       // Indexed but not recent - inform but don't strongly recommend
       return {
         recommended: false,
-        status: 'indexed',
+        status: "indexed",
         indexed_files: indexedFiles,
         last_indexed: lastUpdated,
         reason: `Project is indexed (${indexedFiles} files). Consider re-indexing if you've made significant changes.`,
       };
-    } catch (error) {
+    } catch {
       // If we can't check status, recommend ingesting to be safe
       const ingestCommand = folderPath
         ? `project(action="ingest_local", path="${folderPath}")`
@@ -1061,8 +1193,9 @@ export class ContextStreamClient {
 
       return {
         recommended: true,
-        status: 'not_indexed',
-        reason: 'Unable to determine index status. Ingesting will ensure your codebase is searchable.',
+        status: "not_indexed",
+        reason:
+          "Unable to determine index status. Ingesting will ensure your codebase is searchable.",
         benefits: INGEST_BENEFITS,
         command: ingestCommand,
       };
@@ -1096,53 +1229,59 @@ export class ContextStreamClient {
   // Workspace extended operations (with caching)
   async getWorkspace(workspaceId: string) {
     uuidSchema.parse(workspaceId);
-    
+
     const cacheKey = CacheKeys.workspace(workspaceId);
     const cached = globalCache.get(cacheKey);
     if (cached) return cached;
-    
-    const result = await request(this.config, `/workspaces/${workspaceId}`, { method: 'GET' });
+
+    const result = await request(this.config, `/workspaces/${workspaceId}`, { method: "GET" });
     globalCache.set(cacheKey, result, CacheTTL.WORKSPACE);
     return result;
   }
 
   async workspaceOverview(workspaceId: string) {
     uuidSchema.parse(workspaceId);
-    
+
     const cacheKey = `workspace_overview:${workspaceId}`;
     const cached = globalCache.get(cacheKey);
     if (cached) return cached;
-    
-    const result = await request(this.config, `/workspaces/${workspaceId}/overview`, { method: 'GET' });
+
+    const result = await request(this.config, `/workspaces/${workspaceId}/overview`, {
+      method: "GET",
+    });
     globalCache.set(cacheKey, result, CacheTTL.WORKSPACE);
     return result;
   }
 
   workspaceAnalytics(workspaceId: string) {
     uuidSchema.parse(workspaceId);
-    return request(this.config, `/workspaces/${workspaceId}/analytics`, { method: 'GET' });
+    return request(this.config, `/workspaces/${workspaceId}/analytics`, { method: "GET" });
   }
 
   workspaceContent(workspaceId: string) {
     uuidSchema.parse(workspaceId);
-    return request(this.config, `/workspaces/${workspaceId}/content`, { method: 'GET' });
+    return request(this.config, `/workspaces/${workspaceId}/content`, { method: "GET" });
   }
 
   // Memory extended operations
   getMemoryEvent(eventId: string) {
     uuidSchema.parse(eventId);
-    return request(this.config, `/memory/events/${eventId}`, { method: 'GET' });
+    return request(this.config, `/memory/events/${eventId}`, { method: "GET" });
   }
 
-  updateMemoryEvent(eventId: string, body: { title?: string; content?: string; metadata?: Record<string, any> }) {
+  updateMemoryEvent(
+    eventId: string,
+    body: { title?: string; content?: string; metadata?: Record<string, any> }
+  ) {
     uuidSchema.parse(eventId);
-    return request(this.config, `/memory/events/${eventId}`, { method: 'PUT', body });
+    return request(this.config, `/memory/events/${eventId}`, { method: "PUT", body });
   }
 
   deleteMemoryEvent(eventId: string) {
     uuidSchema.parse(eventId);
-    return request(this.config, `/memory/events/${eventId}`, { method: 'DELETE' })
-      .then((r) => (r === '' || r == null ? { success: true } : r));
+    return request(this.config, `/memory/events/${eventId}`, { method: "DELETE" }).then((r) =>
+      r === "" || r == null ? { success: true } : r
+    );
   }
 
   distillMemoryEvent(eventId: string) {
@@ -1152,51 +1291,61 @@ export class ContextStreamClient {
 
   getKnowledgeNode(nodeId: string) {
     uuidSchema.parse(nodeId);
-    return request(this.config, `/memory/nodes/${nodeId}`, { method: 'GET' });
+    return request(this.config, `/memory/nodes/${nodeId}`, { method: "GET" });
   }
 
-  updateKnowledgeNode(nodeId: string, body: { title?: string; content?: string; relations?: Array<{ type: string; target_id: string }> }) {
+  updateKnowledgeNode(
+    nodeId: string,
+    body: {
+      title?: string;
+      content?: string;
+      relations?: Array<{ type: string; target_id: string }>;
+    }
+  ) {
     uuidSchema.parse(nodeId);
     const apiBody: Record<string, any> = {};
     if (body.title !== undefined) apiBody.summary = body.title;
     if (body.content !== undefined) apiBody.details = body.content;
     if (body.relations && body.relations.length) apiBody.context = { relations: body.relations };
-    return request(this.config, `/memory/nodes/${nodeId}`, { method: 'PUT', body: apiBody });
+    return request(this.config, `/memory/nodes/${nodeId}`, { method: "PUT", body: apiBody });
   }
 
   deleteKnowledgeNode(nodeId: string) {
     uuidSchema.parse(nodeId);
-    return request(this.config, `/memory/nodes/${nodeId}`, { method: 'DELETE' })
-      .then((r) => (r === '' || r == null ? { success: true } : r));
+    return request(this.config, `/memory/nodes/${nodeId}`, { method: "DELETE" }).then((r) =>
+      r === "" || r == null ? { success: true } : r
+    );
   }
 
   supersedeKnowledgeNode(nodeId: string, body: { new_content: string; reason?: string }) {
     uuidSchema.parse(nodeId);
     return (async () => {
-      const existingResp = await this.getKnowledgeNode(nodeId) as any;
+      const existingResp = (await this.getKnowledgeNode(nodeId)) as any;
       const existing = unwrapApiResponse<any>(existingResp);
       if (!existing || !existing.workspace_id) {
-        throw new Error('Failed to load existing node before superseding');
+        throw new Error("Failed to load existing node before superseding");
       }
 
-      const createdResp = await this.createKnowledgeNode({
+      const createdResp = (await this.createKnowledgeNode({
         workspace_id: existing.workspace_id,
         project_id: existing.project_id ?? undefined,
         node_type: existing.node_type,
-        title: existing.summary ?? 'Superseded node',
+        title: existing.summary ?? "Superseded node",
         content: body.new_content,
-      }) as any;
+      })) as any;
       const created = unwrapApiResponse<any>(createdResp);
       if (!created?.id) {
-        throw new Error('Failed to create replacement node for supersede');
+        throw new Error("Failed to create replacement node for supersede");
       }
 
-      await request(this.config, `/memory/nodes/${nodeId}/supersede`, { body: { superseded_by: created.id } });
+      await request(this.config, `/memory/nodes/${nodeId}/supersede`, {
+        body: { superseded_by: created.id },
+      });
 
       return {
         success: true,
         data: {
-          status: 'superseded',
+          status: "superseded",
           old_node_id: nodeId,
           new_node_id: created.id,
           reason: body.reason ?? null,
@@ -1208,33 +1357,33 @@ export class ContextStreamClient {
 
   memoryTimeline(workspaceId: string) {
     uuidSchema.parse(workspaceId);
-    return request(this.config, `/memory/search/timeline/${workspaceId}`, { method: 'GET' });
+    return request(this.config, `/memory/search/timeline/${workspaceId}`, { method: "GET" });
   }
 
   memorySummary(workspaceId: string) {
     uuidSchema.parse(workspaceId);
-    return request(this.config, `/memory/search/summary/${workspaceId}`, { method: 'GET' });
+    return request(this.config, `/memory/search/summary/${workspaceId}`, { method: "GET" });
   }
 
   // Graph extended operations
   async findCircularDependencies(projectId: string) {
     uuidSchema.parse(projectId);
-    return request(this.config, `/graph/circular-dependencies/${projectId}`, { method: 'GET' });
+    return request(this.config, `/graph/circular-dependencies/${projectId}`, { method: "GET" });
   }
 
   async findUnusedCode(projectId: string) {
     uuidSchema.parse(projectId);
-    return request(this.config, `/graph/unused-code/${projectId}`, { method: 'GET' });
+    return request(this.config, `/graph/unused-code/${projectId}`, { method: "GET" });
   }
 
   findContradictions(nodeId: string) {
     uuidSchema.parse(nodeId);
-    return request(this.config, `/graph/knowledge/contradictions/${nodeId}`, { method: 'GET' });
+    return request(this.config, `/graph/knowledge/contradictions/${nodeId}`, { method: "GET" });
   }
 
   // Search suggestions
   searchSuggestions(body: { query: string; workspace_id?: string; project_id?: string }) {
-    return request(this.config, '/search/suggest', { body: this.withDefaults(body) });
+    return request(this.config, "/search/suggest", { body: this.withDefaults(body) });
   }
 
   // ============================================
@@ -1244,35 +1393,38 @@ export class ContextStreamClient {
   /**
    * Initialize a conversation session and retrieve relevant context automatically.
    * This is the key tool for AI assistants to get context at the start of a conversation.
-   * 
+   *
    * Discovery chain:
    * 1. Check local .contextstream/config.json in repo root
    * 2. Check parent folder heuristic mappings (~/.contextstream-mappings.json)
    * 3. If ambiguous, return workspace candidates for user/agent selection
-   * 
+   *
    * Once workspace is resolved, loads WORKSPACE-LEVEL context (not just project),
    * ensuring cross-project decisions and memory are available.
    */
-  async initSession(params: {
-    workspace_id?: string;
-    project_id?: string;
-    session_id?: string;
-    context_hint?: string;
-    include_recent_memory?: boolean;
-    include_decisions?: boolean;
-    include_user_preferences?: boolean;
-    auto_index?: boolean;
-    /**
-     * If true, session_init will return `status: "connected"` even when no workspace
-     * can be resolved. Workspace-level tools (memory/search/graph) may not work without
-     * a workspace, so default behavior is to prompt the user to select/create one.
-     */
-    allow_no_workspace?: boolean;
-  }, ideRoots: string[] = []) {
+  async initSession(
+    params: {
+      workspace_id?: string;
+      project_id?: string;
+      session_id?: string;
+      context_hint?: string;
+      include_recent_memory?: boolean;
+      include_decisions?: boolean;
+      include_user_preferences?: boolean;
+      auto_index?: boolean;
+      /**
+       * If true, session_init will return `status: "connected"` even when no workspace
+       * can be resolved. Workspace-level tools (memory/search/graph) may not work without
+       * a workspace, so default behavior is to prompt the user to select/create one.
+       */
+      allow_no_workspace?: boolean;
+    },
+    ideRoots: string[] = []
+  ) {
     let workspaceId = params.workspace_id || this.config.defaultWorkspaceId;
     let projectId = params.project_id || this.config.defaultProjectId;
     let workspaceName: string | undefined;
-    
+
     // Build comprehensive initial context
     const context: Record<string, unknown> = {
       session_id: params.session_id || randomUUID(),
@@ -1290,78 +1442,84 @@ export class ContextStreamClient {
     if (!workspaceId && rootPath) {
       // Try local config and parent mappings first
       const resolved = resolveWorkspace(rootPath);
-      
+
       if (resolved.config) {
         workspaceId = resolved.config.workspace_id;
         workspaceName = resolved.config.workspace_name;
         projectId = resolved.config.project_id || projectId;
         context.workspace_source = resolved.source;
-        context.workspace_resolved_from = resolved.source === 'local_config' 
-          ? `${rootPath}/.contextstream/config.json`
-          : 'parent_folder_mapping';
+        context.workspace_resolved_from =
+          resolved.source === "local_config"
+            ? `${rootPath}/.contextstream/config.json`
+            : "parent_folder_mapping";
       } else {
         // No local config - try to find matching workspace by name or project
-        const folderName = rootPath ? path.basename(rootPath).toLowerCase() : '';
-        
+        const folderName = rootPath ? path.basename(rootPath).toLowerCase() : "";
+
         try {
-          const workspaces = await this.listWorkspaces({ page_size: 50 }) as { 
-            items?: Array<{ id: string; name: string; description?: string }> 
+          const workspaces = (await this.listWorkspaces({ page_size: 50 })) as {
+            items?: Array<{ id: string; name: string; description?: string }>;
           };
-          
+
           if (workspaces.items && workspaces.items.length > 0) {
             // Try to find a workspace with a matching or similar name
             let matchedWorkspace: { id: string; name: string; description?: string } | undefined;
             let matchSource: string | undefined;
-            
+
             // 1. Exact name match (case-insensitive)
-            matchedWorkspace = workspaces.items.find(
-              w => w.name.toLowerCase() === folderName
-            );
+            matchedWorkspace = workspaces.items.find((w) => w.name.toLowerCase() === folderName);
             if (matchedWorkspace) {
-              matchSource = 'workspace_name_exact';
+              matchSource = "workspace_name_exact";
             }
-            
+
             // 2. Workspace name contains folder name or vice versa
             if (!matchedWorkspace) {
               matchedWorkspace = workspaces.items.find(
-                w => w.name.toLowerCase().includes(folderName) || 
-                     folderName.includes(w.name.toLowerCase())
+                (w) =>
+                  w.name.toLowerCase().includes(folderName) ||
+                  folderName.includes(w.name.toLowerCase())
               );
               if (matchedWorkspace) {
-                matchSource = 'workspace_name_partial';
+                matchSource = "workspace_name_partial";
               }
             }
-            
+
             // 3. Check if any workspace has a project with matching name
             if (!matchedWorkspace) {
               for (const ws of workspaces.items) {
                 try {
-                  const projects = await this.listProjects({ workspace_id: ws.id, page_size: 50 }) as { 
-                    items?: Array<{ id: string; name: string }> 
+                  const projects = (await this.listProjects({
+                    workspace_id: ws.id,
+                    page_size: 50,
+                  })) as {
+                    items?: Array<{ id: string; name: string }>;
                   };
                   const matchingProject = projects.items?.find(
-                    p => p.name.toLowerCase() === folderName ||
-                         p.name.toLowerCase().includes(folderName) ||
-                         folderName.includes(p.name.toLowerCase())
+                    (p) =>
+                      p.name.toLowerCase() === folderName ||
+                      p.name.toLowerCase().includes(folderName) ||
+                      folderName.includes(p.name.toLowerCase())
                   );
                   if (matchingProject) {
                     matchedWorkspace = ws;
-                    matchSource = 'project_name_match';
+                    matchSource = "project_name_match";
                     projectId = matchingProject.id;
-                    context.project_source = 'matched_existing';
+                    context.project_source = "matched_existing";
                     break;
                   }
-                } catch { /* continue checking other workspaces */ }
+                } catch {
+                  /* continue checking other workspaces */
+                }
               }
             }
-            
+
             if (matchedWorkspace) {
               // Found a matching workspace - use it
               workspaceId = matchedWorkspace.id;
               workspaceName = matchedWorkspace.name;
               context.workspace_source = matchSource;
               context.workspace_auto_matched = true;
-              
+
               // Save to local config for next time
               writeLocalConfig(rootPath, {
                 workspace_id: matchedWorkspace.id,
@@ -1370,32 +1528,33 @@ export class ContextStreamClient {
               });
             } else {
               // No match found - need user selection
-              context.status = 'requires_workspace_selection';
-              context.workspace_candidates = workspaces.items.map(w => ({
+              context.status = "requires_workspace_selection";
+              context.workspace_candidates = workspaces.items.map((w) => ({
                 id: w.id,
                 name: w.name,
                 description: w.description,
               }));
-              context.message = `New folder detected: "${rootPath ? path.basename(rootPath) : 'this folder'}". Please select which workspace this belongs to, or create a new one.`;
+              context.message = `New folder detected: "${rootPath ? path.basename(rootPath) : "this folder"}". Please select which workspace this belongs to, or create a new one.`;
               context.ide_roots = ideRoots;
               context.folder_name = rootPath ? path.basename(rootPath) : undefined;
-              
+
               // Return early - agent needs to ask user
               return context;
             }
           } else {
             // No workspaces exist yet. Ask the user for a name rather than
             // auto-creating a workspace from the folder name.
-            const folderDisplayName = rootPath ? (path.basename(rootPath) || 'this folder') : 'this folder';
+            const folderDisplayName = rootPath
+              ? path.basename(rootPath) || "this folder"
+              : "this folder";
 
-            context.status = 'requires_workspace_name';
-            context.workspace_source = 'none_found';
+            context.status = "requires_workspace_name";
+            context.workspace_source = "none_found";
             context.ide_roots = ideRoots;
             context.folder_name = folderDisplayName;
             context.folder_path = rootPath;
             context.suggested_project_name = folderDisplayName;
-            context.message =
-              `No workspaces found for this account. Ask the user for a name for a new workspace, then create a project for "${folderDisplayName}".`;
+            context.message = `No workspaces found for this account. Ask the user for a name for a new workspace, then create a project for "${folderDisplayName}".`;
 
             // Return early - agent needs user input (workspace name)
             return context;
@@ -1409,11 +1568,13 @@ export class ContextStreamClient {
     // Fallback: if still no workspace and no IDE roots, pick first available
     if (!workspaceId && !rootPath) {
       try {
-        const workspaces = await this.listWorkspaces({ page_size: 1 }) as { items?: Array<{ id: string; name: string }> };
+        const workspaces = (await this.listWorkspaces({ page_size: 1 })) as {
+          items?: Array<{ id: string; name: string }>;
+        };
         if (workspaces.items && workspaces.items.length > 0) {
           workspaceId = workspaces.items[0].id;
           workspaceName = workspaces.items[0].name;
-          context.workspace_source = 'fallback_first';
+          context.workspace_source = "fallback_first";
         }
       } catch (e) {
         context.workspace_error = String(e);
@@ -1423,7 +1584,7 @@ export class ContextStreamClient {
     // If we still couldn't resolve a workspace, do not silently continue.
     // Ask the user to select/create a workspace unless explicitly allowed.
     if (!workspaceId && !params.allow_no_workspace) {
-      const folderDisplayName = rootPath ? (path.basename(rootPath) || 'this folder') : 'this folder';
+      const folderDisplayName = rootPath ? path.basename(rootPath) || "this folder" : "this folder";
 
       context.ide_roots = ideRoots;
       context.folder_name = folderDisplayName;
@@ -1433,33 +1594,30 @@ export class ContextStreamClient {
       context.suggested_project_name = folderDisplayName;
 
       try {
-        const workspaces = await this.listWorkspaces({ page_size: 50 }) as {
+        const workspaces = (await this.listWorkspaces({ page_size: 50 })) as {
           items?: Array<{ id: string; name: string; description?: string }>;
         };
 
         const items = Array.isArray(workspaces.items) ? workspaces.items : [];
         if (items.length > 0) {
-          context.status = 'requires_workspace_selection';
+          context.status = "requires_workspace_selection";
           context.workspace_candidates = items.map((w) => ({
             id: w.id,
             name: w.name,
             description: w.description,
           }));
-          context.message =
-            `This folder is not associated with a workspace yet. Please select which workspace to use, or create a new one.`;
+          context.message = `This folder is not associated with a workspace yet. Please select which workspace to use, or create a new one.`;
           return context;
         }
 
-        context.status = 'requires_workspace_name';
-        context.workspace_source = 'none_found';
-        context.message =
-          `No workspaces found for this account. Ask the user for a name for a new workspace, then create a project for "${folderDisplayName}".`;
+        context.status = "requires_workspace_name";
+        context.workspace_source = "none_found";
+        context.message = `No workspaces found for this account. Ask the user for a name for a new workspace, then create a project for "${folderDisplayName}".`;
         return context;
       } catch (e) {
-        context.status = 'requires_workspace_selection';
+        context.status = "requires_workspace_selection";
         context.workspace_error = String(e);
-        context.message =
-          `Unable to resolve a workspace automatically (${String(e)}). Please provide workspace_id, or create one with workspace_bootstrap.`;
+        context.message = `Unable to resolve a workspace automatically (${String(e)}). Please provide workspace_id, or create one with workspace_bootstrap.`;
         return context;
       }
     }
@@ -1468,47 +1626,52 @@ export class ContextStreamClient {
     // STEP 2: Project Discovery
     // ========================================
     if (!projectId && workspaceId && rootPath && params.auto_index !== false) {
-      const projectName = path.basename(rootPath) || 'My Project';
-      
+      const projectName = path.basename(rootPath) || "My Project";
+
       try {
         // Check if a project with this name (or similar) already exists in this workspace
-        const projects = await this.listProjects({ workspace_id: workspaceId }) as { items?: Array<{ id: string; name: string }> };
+        const projects = (await this.listProjects({ workspace_id: workspaceId })) as {
+          items?: Array<{ id: string; name: string }>;
+        };
         const projectNameLower = projectName.toLowerCase();
-        
+
         // Try exact match first, then partial match
-        let existingProject = projects.items?.find(p => p.name.toLowerCase() === projectNameLower);
+        let existingProject = projects.items?.find(
+          (p) => p.name.toLowerCase() === projectNameLower
+        );
         if (existingProject) {
-          context.project_match_type = 'exact';
+          context.project_match_type = "exact";
         } else {
           existingProject = projects.items?.find(
-            p => p.name.toLowerCase().includes(projectNameLower) ||
-                 projectNameLower.includes(p.name.toLowerCase())
+            (p) =>
+              p.name.toLowerCase().includes(projectNameLower) ||
+              projectNameLower.includes(p.name.toLowerCase())
           );
           if (existingProject) {
-            context.project_match_type = 'partial';
+            context.project_match_type = "partial";
           }
         }
-        
+
         if (existingProject) {
           projectId = existingProject.id;
-          context.project_source = 'existing';
+          context.project_source = "existing";
           context.matched_project_name = existingProject.name;
         } else {
           // Create project from IDE root
-          const newProject = await this.createProject({
+          const newProject = (await this.createProject({
             name: projectName,
             description: `Auto-created from ${rootPath}`,
             workspace_id: workspaceId,
-          }) as { id?: string };
-          
+          })) as { id?: string };
+
           if (newProject.id) {
             projectId = newProject.id;
-            context.project_source = 'auto_created';
+            context.project_source = "auto_created";
             context.project_created = true;
             context.project_path = rootPath;
           }
         }
-        
+
         // Update local config with project info
         if (projectId) {
           const existingConfig = readLocalConfig(rootPath);
@@ -1522,18 +1685,19 @@ export class ContextStreamClient {
             });
           }
         }
-        
+
         // Check ingest recommendation and handle based on auto_index setting
         if (projectId) {
           const autoIndex = params.auto_index === undefined || params.auto_index === true;
 
           if (autoIndex) {
             // Auto-index enabled (default): Start ingestion in background and inform user
-            context.indexing_status = 'started';
+            context.indexing_status = "started";
             context.ingest_recommendation = {
               recommended: false,
-              status: 'auto_started',
-              reason: 'Background ingestion started automatically. Your codebase will be searchable shortly.',
+              status: "auto_started",
+              reason:
+                "Background ingestion started automatically. Your codebase will be searchable shortly.",
             } as IngestRecommendation;
 
             // Fire-and-forget: start indexing in background
@@ -1557,15 +1721,18 @@ export class ContextStreamClient {
               context.ingest_recommendation = recommendation;
 
               if (recommendation.recommended) {
-                console.error(`[ContextStream] Ingest recommended for ${rootPath}: ${recommendation.status}`);
+                console.error(
+                  `[ContextStream] Ingest recommended for ${rootPath}: ${recommendation.status}`
+                );
               }
             } catch (e) {
               console.error(`[ContextStream] Failed to check ingest recommendation:`, e);
               // Provide a fallback recommendation
               context.ingest_recommendation = {
                 recommended: true,
-                status: 'not_indexed',
-                reason: 'Unable to determine index status. Consider ingesting to enable code search.',
+                status: "not_indexed",
+                reason:
+                  "Unable to determine index status. Consider ingesting to enable code search.",
                 benefits: INGEST_BENEFITS,
                 command: `project(action="ingest_local", path="${rootPath}")`,
               } as IngestRecommendation;
@@ -1577,7 +1744,7 @@ export class ContextStreamClient {
       }
     }
 
-    context.status = 'connected';
+    context.status = "connected";
     context.workspace_id = workspaceId;
     context.workspace_name = workspaceName;
     context.project_id = projectId;
@@ -1589,7 +1756,7 @@ export class ContextStreamClient {
 
     if (!workspaceId) {
       context.workspace_warning =
-        'No workspace was resolved for this session. Workspace-level tools (memory/search/graph) may not work until you associate this folder with a workspace.';
+        "No workspace was resolved for this session. Workspace-level tools (memory/search/graph) may not work until you associate this folder with a workspace.";
     }
 
     // ========================================
@@ -1606,7 +1773,7 @@ export class ContextStreamClient {
           include_recent_memory: params.include_recent_memory !== false,
           include_decisions: params.include_decisions !== false,
         });
-        
+
         // Merge batched response into context
         if (batchedContext.workspace) {
           context.workspace = batchedContext.workspace;
@@ -1614,13 +1781,15 @@ export class ContextStreamClient {
           // update workspace_id to use the one we actually have access to.
           // This prevents FORBIDDEN errors on subsequent calls.
           if (batchedContext.workspace.id && batchedContext.workspace.id !== workspaceId) {
-            console.error(`[ContextStream] Workspace mismatch: config=${workspaceId}, API returned=${batchedContext.workspace.id}. Using API workspace.`);
+            console.error(
+              `[ContextStream] Workspace mismatch: config=${workspaceId}, API returned=${batchedContext.workspace.id}. Using API workspace.`
+            );
             const oldWorkspaceId = workspaceId;
             workspaceId = batchedContext.workspace.id;
             workspaceName = batchedContext.workspace.name;
             context.workspace_id = workspaceId;
             context.workspace_name = workspaceName;
-            context.workspace_source = 'api_fallback';
+            context.workspace_source = "api_fallback";
             context.workspace_mismatch_warning = `Config had workspace ${oldWorkspaceId} but you don't have access. Using ${workspaceId} instead.`;
 
             // Clear project_id since it likely belongs to the old workspace
@@ -1637,7 +1806,9 @@ export class ContextStreamClient {
                 project_id: projectId, // Use API-returned project or undefined
                 associated_at: new Date().toISOString(),
               });
-              console.error(`[ContextStream] Updated local config with accessible workspace: ${workspaceId}`);
+              console.error(
+                `[ContextStream] Updated local config with accessible workspace: ${workspaceId}`
+              );
             }
           }
         }
@@ -1666,10 +1837,15 @@ export class ContextStreamClient {
             context.lessons = lessons;
             context.lessons_warning = `⚠️ ${lessons.length} lesson(s) from past mistakes. Review before making changes.`;
           }
-        } catch { /* optional */ }
+        } catch {
+          /* optional */
+        }
       } catch (e) {
         // Fallback to individual calls if batched endpoint fails
-        console.error('[ContextStream] Batched endpoint failed, falling back to individual calls:', e);
+        console.error(
+          "[ContextStream] Batched endpoint failed, falling back to individual calls:",
+          e
+        );
         await this._fetchSessionContextFallback(context, workspaceId, projectId, params);
       }
     }
@@ -1685,24 +1861,28 @@ export class ContextStreamClient {
         const autoIndex = params.auto_index !== false;
 
         // Check if index needs refreshing (>1 hour old OR never indexed)
-        const needsRefresh = recommendation.status === 'not_indexed' ||
-          recommendation.status === 'stale' ||
-          recommendation.status === 'indexed';  // 'indexed' means 1-24 hours old
+        const needsRefresh =
+          recommendation.status === "not_indexed" ||
+          recommendation.status === "stale" ||
+          recommendation.status === "indexed"; // 'indexed' means 1-24 hours old
 
-        if (autoIndex && rootPath && needsRefresh && recommendation.status !== 'recently_indexed') {
+        if (autoIndex && rootPath && needsRefresh && recommendation.status !== "recently_indexed") {
           // Auto-index enabled and index is stale - trigger background re-indexing
-          const useIncremental = recommendation.last_indexed && recommendation.status !== 'not_indexed';
-          console.error(`[ContextStream] Auto-refreshing stale index for project ${projectId}: ${recommendation.status} (${useIncremental ? 'incremental' : 'full'})`);
+          const useIncremental =
+            recommendation.last_indexed && recommendation.status !== "not_indexed";
+          console.error(
+            `[ContextStream] Auto-refreshing stale index for project ${projectId}: ${recommendation.status} (${useIncremental ? "incremental" : "full"})`
+          );
 
-          context.indexing_status = 'refreshing';
+          context.indexing_status = "refreshing";
           context.ingest_recommendation = {
             recommended: false,
-            status: 'auto_refreshing',
+            status: "auto_refreshing",
             indexed_files: recommendation.indexed_files,
             last_indexed: recommendation.last_indexed,
             reason: useIncremental
-              ? 'Incremental index refresh started automatically (only changed files).'
-              : 'Background index refresh started automatically to capture recent changes.',
+              ? "Incremental index refresh started automatically (only changed files)."
+              : "Background index refresh started automatically to capture recent changes.",
           } as IngestRecommendation;
 
           // Fire-and-forget: start re-indexing in background
@@ -1714,10 +1894,14 @@ export class ContextStreamClient {
               // Use incremental indexing if we have a last_indexed timestamp
               if (useIncremental && lastIndexedCopy) {
                 const sinceDate = new Date(lastIndexedCopy);
-                for await (const batch of readChangedFilesInBatches(rootPathCopy, sinceDate, { batchSize: 50 })) {
+                for await (const batch of readChangedFilesInBatches(rootPathCopy, sinceDate, {
+                  batchSize: 50,
+                })) {
                   await this.ingestFiles(projectIdCopy, batch);
                 }
-                console.error(`[ContextStream] Incremental index refresh completed for ${rootPathCopy}`);
+                console.error(
+                  `[ContextStream] Incremental index refresh completed for ${rootPathCopy}`
+                );
               } else {
                 for await (const batch of readAllFilesInBatches(rootPathCopy, { batchSize: 50 })) {
                   await this.ingestFiles(projectIdCopy, batch);
@@ -1733,16 +1917,22 @@ export class ContextStreamClient {
           context.ingest_recommendation = recommendation;
 
           if (recommendation.recommended) {
-            console.error(`[ContextStream] Ingest recommended for existing project ${projectId}: ${recommendation.status}`);
+            console.error(
+              `[ContextStream] Ingest recommended for existing project ${projectId}: ${recommendation.status}`
+            );
           }
         }
       } catch (e) {
-        console.error(`[ContextStream] Failed to check ingest recommendation for existing project:`, e);
+        console.error(
+          `[ContextStream] Failed to check ingest recommendation for existing project:`,
+          e
+        );
         // Provide informational status even on error
         context.ingest_recommendation = {
           recommended: false,
-          status: 'indexed',
-          reason: 'Unable to determine exact index status. Use project(action="index_status") to check.',
+          status: "indexed",
+          reason:
+            'Unable to determine exact index status. Use project(action="index_status") to check.',
         } as IngestRecommendation;
       }
     }
@@ -1780,12 +1970,12 @@ export class ContextStreamClient {
     const cacheKey = CacheKeys.sessionInit(params.workspace_id, params.project_id);
     const cached = globalCache.get<SessionContextData>(cacheKey);
     if (cached) {
-      console.error('[ContextStream] Session context cache HIT');
+      console.error("[ContextStream] Session context cache HIT");
       return cached;
     }
 
     // Call batched endpoint
-    const result = await request(this.config, '/session/init', {
+    const result = (await request(this.config, "/session/init", {
       body: {
         workspace_id: params.workspace_id,
         project_id: params.project_id,
@@ -1794,14 +1984,15 @@ export class ContextStreamClient {
         include_decisions: params.include_decisions ?? true,
         client_version: VERSION,
       },
-    }) as { data?: SessionContextData } | SessionContextData;
+    })) as { data?: SessionContextData } | SessionContextData;
 
     // Handle both wrapped {data: ...} and direct response formats
-    const contextData: SessionContextData = 'data' in result && result.data ? result.data : result as SessionContextData;
-    
+    const contextData: SessionContextData =
+      "data" in result && result.data ? result.data : (result as SessionContextData);
+
     // Cache the result
     globalCache.set(cacheKey, contextData, CacheTTL.SESSION_INIT);
-    
+
     return contextData;
   }
 
@@ -1831,7 +2022,11 @@ export class ContextStreamClient {
         : Promise.resolve(null),
       // 4: relevant context from semantic search
       params.context_hint
-        ? this.memorySearch({ query: params.context_hint, workspace_id: workspaceId, limit: 5 }).catch(() => null)
+        ? this.memorySearch({
+            query: params.context_hint,
+            workspace_id: workspaceId,
+            limit: 5,
+          }).catch(() => null)
         : Promise.resolve(null),
       // 5: high-priority lessons
       this.getHighPriorityLessons({
@@ -1871,7 +2066,7 @@ export class ContextStreamClient {
     create_parent_mapping?: boolean; // Also create a parent folder mapping
   }) {
     const { folder_path, workspace_id, workspace_name, create_parent_mapping } = params;
-    
+
     // Save local config
     const saved = writeLocalConfig(folder_path, {
       workspace_id,
@@ -1883,9 +2078,9 @@ export class ContextStreamClient {
     if (create_parent_mapping) {
       const parentDir = path.dirname(folder_path);
       addGlobalMapping({
-        pattern: path.join(parentDir, '*'),
+        pattern: path.join(parentDir, "*"),
         workspace_id,
-        workspace_name: workspace_name || 'Unknown',
+        workspace_name: workspace_name || "Unknown",
       });
     }
 
@@ -1904,9 +2099,9 @@ export class ContextStreamClient {
    */
   async getUserContext(params: { workspace_id?: string }) {
     const withDefaults = this.withDefaults(params);
-    
+
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for getUserContext');
+      throw new Error("workspace_id is required for getUserContext");
     }
 
     const context: Record<string, unknown> = {};
@@ -1914,16 +2109,20 @@ export class ContextStreamClient {
     // Search for user preferences
     try {
       context.preferences = await this.memorySearch({
-        query: 'user preferences coding style settings',
+        query: "user preferences coding style settings",
         workspace_id: withDefaults.workspace_id,
         limit: 10,
       });
-    } catch { /* optional */ }
+    } catch {
+      /* optional */
+    }
 
     // Get memory summary for overall context
     try {
       context.summary = await this.memorySummary(withDefaults.workspace_id);
-    } catch { /* optional */ }
+    } catch {
+      /* optional */
+    }
 
     return context;
   }
@@ -1936,58 +2135,72 @@ export class ContextStreamClient {
     workspace_id?: string;
     project_id?: string;
     session_id?: string;
-    event_type: 'conversation' | 'decision' | 'insight' | 'preference' | 'note' | 'implementation' | 'task' | 'bug' | 'feature' | 'plan' | 'correction' | 'lesson' | 'warning' | 'frustration';
+    event_type:
+      | "conversation"
+      | "decision"
+      | "insight"
+      | "preference"
+      | "note"
+      | "implementation"
+      | "task"
+      | "bug"
+      | "feature"
+      | "plan"
+      | "correction"
+      | "lesson"
+      | "warning"
+      | "frustration";
     title: string;
     content: string;
     tags?: string[];
-    importance?: 'low' | 'medium' | 'high' | 'critical';
+    importance?: "low" | "medium" | "high" | "critical";
     provenance?: Record<string, unknown>;
     code_refs?: Array<{ file_path: string; symbol_id?: string; symbol_name?: string }>;
   }) {
     const withDefaults = this.withDefaults(params);
 
     // Map high-level types to API EventType
-    let apiEventType = 'manual_note';
+    let apiEventType = "manual_note";
     const tags = params.tags || [];
 
     switch (params.event_type) {
-      case 'conversation':
-        apiEventType = 'chat';
+      case "conversation":
+        apiEventType = "chat";
         break;
       // Plans & Tasks feature - use dedicated event types
-      case 'task':
-        apiEventType = 'task';
+      case "task":
+        apiEventType = "task";
         break;
-      case 'plan':
-        apiEventType = 'plan';
+      case "plan":
+        apiEventType = "plan";
         break;
-      case 'bug':
-      case 'feature':
-        apiEventType = 'ticket';
+      case "bug":
+      case "feature":
+        apiEventType = "ticket";
         tags.push(params.event_type);
         break;
-      case 'decision':
-      case 'insight':
-      case 'preference':
-      case 'note':
-      case 'implementation':
-        apiEventType = 'manual_note';
+      case "decision":
+      case "insight":
+      case "preference":
+      case "note":
+      case "implementation":
+        apiEventType = "manual_note";
         tags.push(params.event_type);
         break;
       // Lesson system types - all stored as manual_note with specific tags
-      case 'correction':
-      case 'lesson':
-      case 'warning':
-      case 'frustration':
-        apiEventType = 'manual_note';
+      case "correction":
+      case "lesson":
+      case "warning":
+      case "frustration":
+        apiEventType = "manual_note";
         tags.push(params.event_type);
         // Add lesson-related tag for easier filtering
-        if (!tags.includes('lesson_system')) {
-          tags.push('lesson_system');
+        if (!tags.includes("lesson_system")) {
+          tags.push("lesson_system");
         }
         break;
       default:
-        apiEventType = 'manual_note';
+        apiEventType = "manual_note";
         tags.push(params.event_type);
     }
 
@@ -2003,9 +2216,9 @@ export class ContextStreamClient {
         original_type: params.event_type,
         session_id: params.session_id,
         tags: tags,
-        importance: params.importance || 'medium',
+        importance: params.importance || "medium",
         captured_at: new Date().toISOString(),
-        source: 'mcp_auto_capture',
+        source: "mcp_auto_capture",
       },
     });
   }
@@ -2014,12 +2227,12 @@ export class ContextStreamClient {
     workspace_id?: string;
     project_id?: string;
     item_id: string;
-    item_type: 'memory_event' | 'knowledge_node' | 'code_chunk';
-    feedback_type: 'relevant' | 'irrelevant' | 'pin';
+    item_type: "memory_event" | "knowledge_node" | "code_chunk";
+    feedback_type: "relevant" | "irrelevant" | "pin";
     query_text?: string;
     metadata?: Record<string, unknown>;
   }) {
-    return request(this.config, '/context/smart/feedback', { body: this.withDefaults(body) });
+    return request(this.config, "/context/smart/feedback", { body: this.withDefaults(body) });
   }
 
   decisionTrace(body: {
@@ -2029,7 +2242,7 @@ export class ContextStreamClient {
     limit?: number;
     include_impact?: boolean;
   }) {
-    return request(this.config, '/memory/search/decisions/trace', {
+    return request(this.config, "/memory/search/decisions/trace", {
       body: this.withDefaults(body),
     });
   }
@@ -2042,16 +2255,18 @@ export class ContextStreamClient {
     content: string;
     workspace_id?: string;
     project_id?: string;
-    importance?: 'low' | 'medium' | 'high';
+    importance?: "low" | "medium" | "high";
     await_indexing?: boolean;
   }) {
     const withDefaults = this.withDefaults(params);
 
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for session_remember. Set defaultWorkspaceId in config or provide workspace_id.');
+      throw new Error(
+        "workspace_id is required for session_remember. Set defaultWorkspaceId in config or provide workspace_id."
+      );
     }
 
-    return request(this.config, '/session/remember', {
+    return request(this.config, "/session/remember", {
       body: {
         content: params.content,
         workspace_id: withDefaults.workspace_id,
@@ -2074,7 +2289,7 @@ export class ContextStreamClient {
     include_decisions?: boolean;
   }) {
     const withDefaults = this.withDefaults(params);
-    
+
     const results: Record<string, unknown> = {};
 
     // Primary memory search
@@ -2085,7 +2300,9 @@ export class ContextStreamClient {
         project_id: withDefaults.project_id,
         limit: 10,
       });
-    } catch { /* optional */ }
+    } catch {
+      /* optional */
+    }
 
     // Semantic code search if project specified
     if (withDefaults.project_id) {
@@ -2096,7 +2313,9 @@ export class ContextStreamClient {
           project_id: withDefaults.project_id,
           limit: 5,
         });
-      } catch { /* optional */ }
+      } catch {
+        /* optional */
+      }
     }
 
     // Include related decisions
@@ -2107,7 +2326,9 @@ export class ContextStreamClient {
           project_id: withDefaults.project_id,
           limit: 3,
         });
-      } catch { /* optional */ }
+      } catch {
+        /* optional */
+      }
     }
 
     return results;
@@ -2132,10 +2353,10 @@ export class ContextStreamClient {
     metadata?: any;
   }) {
     const payload = this.withDefaults({
-      source: 'mcp',
+      source: "mcp",
       ...body,
     });
-    return request(this.config, '/analytics/token-savings', { body: payload });
+    return request(this.config, "/analytics/token-savings", { body: payload });
   }
 
   /**
@@ -2160,10 +2381,10 @@ export class ContextStreamClient {
   }> {
     const withDefaults = this.withDefaults(params);
     const maxTokens = params.max_tokens || 500;
-    
+
     if (!withDefaults.workspace_id) {
       return {
-        summary: 'No workspace context loaded. Call session_init first.',
+        summary: "No workspace context loaded. Call session_init first.",
         decision_count: 0,
         memory_count: 0,
       };
@@ -2183,7 +2404,9 @@ export class ContextStreamClient {
       if (workspaceName) {
         parts.push(`📁 Workspace: ${workspaceName}`);
       }
-    } catch { /* optional */ }
+    } catch {
+      /* optional */
+    }
 
     // Get project info if specified (cached)
     if (withDefaults.project_id) {
@@ -2194,81 +2417,89 @@ export class ContextStreamClient {
         if (projectName) {
           parts.push(`📂 Project: ${projectName}`);
         }
-      } catch { /* optional */ }
+      } catch {
+        /* optional */
+      }
     }
 
     // Get recent decisions (titles only for token efficiency)
     try {
-      const decisions = await this.memoryDecisions({
+      const decisions = (await this.memoryDecisions({
         workspace_id: withDefaults.workspace_id,
         project_id: withDefaults.project_id,
         limit: 5,
-      }) as { items?: Array<{ title?: string }> };
-      
+      })) as { items?: Array<{ title?: string }> };
+
       if (decisions.items && decisions.items.length > 0) {
         decisionCount = decisions.items.length;
-        parts.push('');
-        parts.push('📋 Recent Decisions:');
+        parts.push("");
+        parts.push("📋 Recent Decisions:");
         decisions.items.slice(0, 3).forEach((d, i) => {
-          parts.push(`  ${i + 1}. ${d.title || 'Untitled'}`);
+          parts.push(`  ${i + 1}. ${d.title || "Untitled"}`);
         });
         if (decisions.items.length > 3) {
           parts.push(`  (+${decisions.items.length - 3} more)`);
         }
       }
-    } catch { /* optional */ }
+    } catch {
+      /* optional */
+    }
 
     // Get preferences count and sample
     try {
-      const prefs = await this.memorySearch({
-        query: 'user preferences coding style settings',
+      const prefs = (await this.memorySearch({
+        query: "user preferences coding style settings",
         workspace_id: withDefaults.workspace_id,
         limit: 5,
-      }) as { results?: Array<{ title?: string }> };
-      
+      })) as { results?: Array<{ title?: string }> };
+
       if (prefs.results && prefs.results.length > 0) {
-        parts.push('');
-        parts.push('⚙️ Preferences:');
+        parts.push("");
+        parts.push("⚙️ Preferences:");
         prefs.results.slice(0, 3).forEach((p) => {
-          const title = p.title || 'Preference';
+          const title = p.title || "Preference";
           // Truncate to save tokens
-          parts.push(`  • ${title.slice(0, 60)}${title.length > 60 ? '...' : ''}`);
+          parts.push(`  • ${title.slice(0, 60)}${title.length > 60 ? "..." : ""}`);
         });
       }
-    } catch { /* optional */ }
+    } catch {
+      /* optional */
+    }
 
     // Get memory count
     try {
-      const summary = await this.memorySummary(withDefaults.workspace_id) as { events?: number };
+      const summary = (await this.memorySummary(withDefaults.workspace_id)) as { events?: number };
       memoryCount = summary.events || 0;
       if (memoryCount > 0) {
-        parts.push('');
+        parts.push("");
         parts.push(`🧠 Memory: ${memoryCount} events stored`);
       }
-    } catch { /* optional */ }
+    } catch {
+      /* optional */
+    }
 
     // Add usage hint
-    parts.push('');
+    parts.push("");
     parts.push('💡 Use session_recall("topic") for specific context');
 
-    const candidateSummary = parts.join('\n');
+    const candidateSummary = parts.join("\n");
     const maxChars = maxTokens * 4; // ~4 chars per token
 
     // Enforce max token budget by truncating on line boundaries (keeps summary stable).
-    const candidateLines = candidateSummary.split('\n');
+    const candidateLines = candidateSummary.split("\n");
     const finalLines: string[] = [];
     let used = 0;
     for (const line of candidateLines) {
-      const next = (finalLines.length ? '\n' : '') + line;
+      const next = (finalLines.length ? "\n" : "") + line;
       if (used + next.length > maxChars) break;
       finalLines.push(line);
       used += next.length;
     }
-    const summary = finalLines.join('\n');
+    const summary = finalLines.join("\n");
 
     // Best-effort analytics: record how much we trimmed vs the full candidate summary.
     this.trackTokenSavings({
-      tool: 'session_summary',
+      tool: "session_summary",
       workspace_id: withDefaults.workspace_id,
       project_id: withDefaults.project_id,
       candidate_chars: candidateSummary.length,
@@ -2300,7 +2531,7 @@ export class ContextStreamClient {
     workspace_id?: string;
     project_id?: string;
     chat_history: string;
-    extract_types?: Array<'decisions' | 'preferences' | 'insights' | 'tasks' | 'code_patterns'>;
+    extract_types?: Array<"decisions" | "preferences" | "insights" | "tasks" | "code_patterns">;
   }): Promise<{
     events_created: number;
     extracted: {
@@ -2312,12 +2543,18 @@ export class ContextStreamClient {
     };
   }> {
     const withDefaults = this.withDefaults(params);
-    
+
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for compressChat');
+      throw new Error("workspace_id is required for compressChat");
     }
 
-    const extractTypes = params.extract_types || ['decisions', 'preferences', 'insights', 'tasks', 'code_patterns'];
+    const extractTypes = params.extract_types || [
+      "decisions",
+      "preferences",
+      "insights",
+      "tasks",
+      "code_patterns",
+    ];
     const extracted: {
       decisions: string[];
       preferences: string[];
@@ -2335,63 +2572,73 @@ export class ContextStreamClient {
     let eventsCreated = 0;
 
     // Simple extraction patterns (AI can do better, but this works without LLM call)
-    const lines = params.chat_history.split('\n');
-    
+    const lines = params.chat_history.split("\n");
+
     for (const line of lines) {
       const lowerLine = line.toLowerCase();
-      
+
       // Decision patterns
-      if (extractTypes.includes('decisions')) {
-        if (lowerLine.includes('decided to') ||
-            lowerLine.includes('decision:') ||
-            lowerLine.includes('we\'ll use') ||
-            lowerLine.includes('going with') ||
-            lowerLine.includes('chose ')) {
+      if (extractTypes.includes("decisions")) {
+        if (
+          lowerLine.includes("decided to") ||
+          lowerLine.includes("decision:") ||
+          lowerLine.includes("we'll use") ||
+          lowerLine.includes("going with") ||
+          lowerLine.includes("chose ")
+        ) {
           extracted.decisions.push(line.trim());
         }
       }
-      
+
       // Preference patterns
-      if (extractTypes.includes('preferences')) {
-        if (lowerLine.includes('prefer') ||
-            lowerLine.includes('i like') ||
-            lowerLine.includes('always use') ||
-            lowerLine.includes('don\'t use') ||
-            lowerLine.includes('never use')) {
+      if (extractTypes.includes("preferences")) {
+        if (
+          lowerLine.includes("prefer") ||
+          lowerLine.includes("i like") ||
+          lowerLine.includes("always use") ||
+          lowerLine.includes("don't use") ||
+          lowerLine.includes("never use")
+        ) {
           extracted.preferences.push(line.trim());
         }
       }
-      
+
       // Task patterns
-      if (extractTypes.includes('tasks')) {
-        if (lowerLine.includes('todo:') ||
-            lowerLine.includes('task:') ||
-            lowerLine.includes('need to') ||
-            lowerLine.includes('should implement') ||
-            lowerLine.includes('will add')) {
+      if (extractTypes.includes("tasks")) {
+        if (
+          lowerLine.includes("todo:") ||
+          lowerLine.includes("task:") ||
+          lowerLine.includes("need to") ||
+          lowerLine.includes("should implement") ||
+          lowerLine.includes("will add")
+        ) {
           extracted.tasks.push(line.trim());
         }
       }
-      
+
       // Insight patterns
-      if (extractTypes.includes('insights')) {
-        if (lowerLine.includes('learned that') ||
-            lowerLine.includes('realized') ||
-            lowerLine.includes('found out') ||
-            lowerLine.includes('discovered') ||
-            lowerLine.includes('important:') ||
-            lowerLine.includes('note:')) {
+      if (extractTypes.includes("insights")) {
+        if (
+          lowerLine.includes("learned that") ||
+          lowerLine.includes("realized") ||
+          lowerLine.includes("found out") ||
+          lowerLine.includes("discovered") ||
+          lowerLine.includes("important:") ||
+          lowerLine.includes("note:")
+        ) {
           extracted.insights.push(line.trim());
         }
       }
-      
+
       // Code pattern patterns
-      if (extractTypes.includes('code_patterns')) {
-        if (lowerLine.includes('pattern:') ||
-            lowerLine.includes('convention:') ||
-            lowerLine.includes('style:') ||
-            lowerLine.includes('always format') ||
-            lowerLine.includes('naming convention')) {
+      if (extractTypes.includes("code_patterns")) {
+        if (
+          lowerLine.includes("pattern:") ||
+          lowerLine.includes("convention:") ||
+          lowerLine.includes("style:") ||
+          lowerLine.includes("always format") ||
+          lowerLine.includes("naming convention")
+        ) {
           extracted.code_patterns.push(line.trim());
         }
       }
@@ -2403,13 +2650,15 @@ export class ContextStreamClient {
         await this.captureContext({
           workspace_id: withDefaults.workspace_id,
           project_id: withDefaults.project_id,
-          event_type: 'decision',
+          event_type: "decision",
           title: decision.slice(0, 100),
           content: decision,
-          importance: 'medium',
+          importance: "medium",
         });
         eventsCreated++;
-      } catch { /* continue */ }
+      } catch {
+        /* continue */
+      }
     }
 
     for (const pref of extracted.preferences.slice(0, 5)) {
@@ -2417,13 +2666,15 @@ export class ContextStreamClient {
         await this.captureContext({
           workspace_id: withDefaults.workspace_id,
           project_id: withDefaults.project_id,
-          event_type: 'preference',
+          event_type: "preference",
           title: pref.slice(0, 100),
           content: pref,
-          importance: 'medium',
+          importance: "medium",
         });
         eventsCreated++;
-      } catch { /* continue */ }
+      } catch {
+        /* continue */
+      }
     }
 
     for (const task of extracted.tasks.slice(0, 5)) {
@@ -2431,13 +2682,15 @@ export class ContextStreamClient {
         await this.captureContext({
           workspace_id: withDefaults.workspace_id,
           project_id: withDefaults.project_id,
-          event_type: 'task',
+          event_type: "task",
           title: task.slice(0, 100),
           content: task,
-          importance: 'medium',
+          importance: "medium",
         });
         eventsCreated++;
-      } catch { /* continue */ }
+      } catch {
+        /* continue */
+      }
     }
 
     for (const insight of extracted.insights.slice(0, 5)) {
@@ -2445,13 +2698,15 @@ export class ContextStreamClient {
         await this.captureContext({
           workspace_id: withDefaults.workspace_id,
           project_id: withDefaults.project_id,
-          event_type: 'insight',
+          event_type: "insight",
           title: insight.slice(0, 100),
           content: insight,
-          importance: 'medium',
+          importance: "medium",
         });
         eventsCreated++;
-      } catch { /* continue */ }
+      } catch {
+        /* continue */
+      }
     }
 
     return {
@@ -2484,11 +2739,11 @@ export class ContextStreamClient {
   }> {
     const withDefaults = this.withDefaults(params);
     const maxTokens = params.max_tokens || 2000;
-    
+
     // Rough token estimation: ~4 chars per token
     const charsPerToken = 4;
     const maxChars = maxTokens * charsPerToken;
-    
+
     const parts: string[] = [];
     const candidateParts: string[] = [];
     const sources: Array<{ type: string; title: string }> = [];
@@ -2497,19 +2752,19 @@ export class ContextStreamClient {
     // Priority 1: Decisions (most valuable per token)
     if (params.include_decisions !== false && withDefaults.workspace_id) {
       try {
-        const decisions = await this.memoryDecisions({
+        const decisions = (await this.memoryDecisions({
           workspace_id: withDefaults.workspace_id,
           project_id: withDefaults.project_id,
           limit: 10,
-        }) as { items?: Array<{ title?: string; content?: string }> };
-        
+        })) as { items?: Array<{ title?: string; content?: string }> };
+
         if (decisions.items) {
-          parts.push('## Relevant Decisions\n');
-          candidateParts.push('## Relevant Decisions\n');
+          parts.push("## Relevant Decisions\n");
+          candidateParts.push("## Relevant Decisions\n");
           currentChars += 25;
-          
+
           const decisionEntries = decisions.items.map((d) => {
-            const title = d.title || 'Decision';
+            const title = d.title || "Decision";
             return { title, entry: `• ${title}\n` };
           });
 
@@ -2517,38 +2772,40 @@ export class ContextStreamClient {
           for (const d of decisionEntries) {
             candidateParts.push(d.entry);
           }
-          candidateParts.push('\n');
+          candidateParts.push("\n");
 
           // Final: what fits in the budget.
           for (const d of decisionEntries) {
             if (currentChars + d.entry.length > maxChars * 0.4) break; // Reserve 40% for decisions
             parts.push(d.entry);
             currentChars += d.entry.length;
-            sources.push({ type: 'decision', title: d.title });
+            sources.push({ type: "decision", title: d.title });
           }
-          parts.push('\n');
+          parts.push("\n");
         }
-      } catch { /* optional */ }
+      } catch {
+        /* optional */
+      }
     }
 
     // Priority 2: Memory search results (query-relevant)
     if (params.include_memory !== false && withDefaults.workspace_id) {
       try {
-        const memory = await this.memorySearch({
+        const memory = (await this.memorySearch({
           query: params.query,
           workspace_id: withDefaults.workspace_id,
           project_id: withDefaults.project_id,
           limit: 5,
-        }) as { results?: Array<{ title?: string; content?: string }> };
-        
+        })) as { results?: Array<{ title?: string; content?: string }> };
+
         if (memory.results) {
-          parts.push('## Related Context\n');
-          candidateParts.push('## Related Context\n');
+          parts.push("## Related Context\n");
+          candidateParts.push("## Related Context\n");
           currentChars += 20;
-          
+
           const memoryEntries = memory.results.map((m) => {
-            const title = m.title || 'Context';
-            const content = m.content?.slice(0, 200) || '';
+            const title = m.title || "Context";
+            const content = m.content?.slice(0, 200) || "";
             return { title, entry: `• ${title}: ${content}...\n` };
           });
 
@@ -2556,38 +2813,40 @@ export class ContextStreamClient {
           for (const m of memoryEntries) {
             candidateParts.push(m.entry);
           }
-          candidateParts.push('\n');
+          candidateParts.push("\n");
 
           // Final: what fits in the budget.
           for (const m of memoryEntries) {
             if (currentChars + m.entry.length > maxChars * 0.7) break; // Reserve 30% for code
             parts.push(m.entry);
             currentChars += m.entry.length;
-            sources.push({ type: 'memory', title: m.title });
+            sources.push({ type: "memory", title: m.title });
           }
-          parts.push('\n');
+          parts.push("\n");
         }
-      } catch { /* optional */ }
+      } catch {
+        /* optional */
+      }
     }
 
     // Priority 3: Code search results (if budget allows)
     if (params.include_code && withDefaults.project_id && currentChars < maxChars * 0.8) {
       try {
-        const code = await this.searchSemantic({
+        const code = (await this.searchSemantic({
           query: params.query,
           workspace_id: withDefaults.workspace_id,
           project_id: withDefaults.project_id,
           limit: 3,
-        }) as { results?: Array<{ file_path?: string; content?: string }> };
-        
+        })) as { results?: Array<{ file_path?: string; content?: string }> };
+
         if (code.results) {
-          parts.push('## Relevant Code\n');
-          candidateParts.push('## Relevant Code\n');
+          parts.push("## Relevant Code\n");
+          candidateParts.push("## Relevant Code\n");
           currentChars += 18;
-          
+
           const codeEntries = code.results.map((c) => {
-            const path = c.file_path || 'file';
-            const content = c.content?.slice(0, 150) || '';
+            const path = c.file_path || "file";
+            const content = c.content?.slice(0, 150) || "";
             return { path, entry: `• ${path}: ${content}...\n` };
           });
 
@@ -2601,18 +2860,20 @@ export class ContextStreamClient {
             if (currentChars + c.entry.length > maxChars) break;
             parts.push(c.entry);
             currentChars += c.entry.length;
-            sources.push({ type: 'code', title: c.path });
+            sources.push({ type: "code", title: c.path });
           }
         }
-      } catch { /* optional */ }
+      } catch {
+        /* optional */
+      }
     }
 
-    const context = parts.join('');
-    const candidateContext = candidateParts.join('');
+    const context = parts.join("");
+    const candidateContext = candidateParts.join("");
     const tokenEstimate = Math.ceil(context.length / charsPerToken);
 
     this.trackTokenSavings({
-      tool: 'ai_context_budget',
+      tool: "ai_context_budget",
       workspace_id: withDefaults.workspace_id,
       project_id: withDefaults.project_id,
       candidate_chars: candidateContext.length,
@@ -2648,7 +2909,7 @@ export class ContextStreamClient {
     items: Array<{ type: string; title: string; created_at: string }>;
   }> {
     const withDefaults = this.withDefaults(params);
-    
+
     if (!withDefaults.workspace_id) {
       return { new_decisions: 0, new_memory: 0, items: [] };
     }
@@ -2658,29 +2919,37 @@ export class ContextStreamClient {
     let newMemory = 0;
 
     try {
-      const memory = await this.listMemoryEvents({
+      const memory = (await this.listMemoryEvents({
         workspace_id: withDefaults.workspace_id,
         project_id: withDefaults.project_id,
         limit: params.limit || 20,
-      }) as { items?: Array<{ title?: string; created_at?: string; metadata?: { original_type?: string } }> };
+      })) as {
+        items?: Array<{
+          title?: string;
+          created_at?: string;
+          metadata?: { original_type?: string };
+        }>;
+      };
 
       if (memory.items) {
         for (const item of memory.items) {
-          const createdAt = item.created_at || '';
+          const createdAt = item.created_at || "";
           if (createdAt > params.since) {
-            const type = item.metadata?.original_type || 'memory';
+            const type = item.metadata?.original_type || "memory";
             items.push({
               type,
-              title: item.title || 'Untitled',
+              title: item.title || "Untitled",
               created_at: createdAt,
             });
-            
-            if (type === 'decision') newDecisions++;
+
+            if (type === "decision") newDecisions++;
             else newMemory++;
           }
         }
       }
-    } catch { /* optional */ }
+    } catch {
+      /* optional */
+    }
 
     return {
       new_decisions: newDecisions,
@@ -2712,8 +2981,8 @@ export class ContextStreamClient {
     workspace_id?: string;
     project_id?: string;
     max_tokens?: number;
-    format?: 'minified' | 'readable' | 'structured';
-    mode?: 'standard' | 'pack';
+    format?: "minified" | "readable" | "structured";
+    mode?: "standard" | "pack";
     distill?: boolean;
   }): Promise<{
     context: string;
@@ -2724,17 +2993,17 @@ export class ContextStreamClient {
     project_id?: string;
     errors?: string[];
     version_notice?: VersionNotice;
-    index_status?: 'refreshing' | 'fresh' | 'stale';
+    index_status?: "refreshing" | "fresh" | "stale";
   }> {
     const withDefaults = this.withDefaults(params);
     const maxTokens = params.max_tokens || 800;
-    const format = params.format || 'minified';
+    const format = params.format || "minified";
     const usePackDefault = this.config.contextPackEnabled !== false && !!withDefaults.project_id;
-    const mode = params.mode || (usePackDefault ? 'pack' : 'standard');
-    
+    const mode = params.mode || (usePackDefault ? "pack" : "standard");
+
     if (!withDefaults.workspace_id) {
       return {
-        context: '[NO_WORKSPACE]',
+        context: "[NO_WORKSPACE]",
         token_estimate: 2,
         format,
         sources_used: 0,
@@ -2749,7 +3018,9 @@ export class ContextStreamClient {
     const TEN_MINUTES_MS = 10 * 60 * 1000;
     const now = Date.now();
     const sessionAge = this.sessionStartTime ? now - this.sessionStartTime : 0;
-    const timeSinceLastCheck = this.lastRefreshCheckTime ? now - this.lastRefreshCheckTime : Infinity;
+    const timeSinceLastCheck = this.lastRefreshCheckTime
+      ? now - this.lastRefreshCheckTime
+      : Infinity;
 
     if (
       sessionAge > THIRTY_MINUTES_MS &&
@@ -2766,26 +3037,36 @@ export class ContextStreamClient {
       (async () => {
         try {
           const recommendation = await this.checkIngestRecommendation(projectIdCopy, rootPathCopy);
-          const needsRefresh = recommendation.status === 'not_indexed' ||
-            recommendation.status === 'stale' ||
-            recommendation.status === 'indexed';  // 'indexed' means 1-24 hours old
+          const needsRefresh =
+            recommendation.status === "not_indexed" ||
+            recommendation.status === "stale" ||
+            recommendation.status === "indexed"; // 'indexed' means 1-24 hours old
 
-          if (needsRefresh && recommendation.status !== 'recently_indexed') {
+          if (needsRefresh && recommendation.status !== "recently_indexed") {
             this.indexRefreshInProgress = true;
-            const useIncremental = recommendation.last_indexed && recommendation.status !== 'not_indexed';
-            console.error(`[ContextStream] Long session re-index: refreshing stale index for project ${projectIdCopy} (session age: ${Math.round(sessionAge / 60000)} mins, ${useIncremental ? 'incremental' : 'full'})`);
+            const useIncremental =
+              recommendation.last_indexed && recommendation.status !== "not_indexed";
+            console.error(
+              `[ContextStream] Long session re-index: refreshing stale index for project ${projectIdCopy} (session age: ${Math.round(sessionAge / 60000)} mins, ${useIncremental ? "incremental" : "full"})`
+            );
             try {
               if (useIncremental && recommendation.last_indexed) {
                 const sinceDate = new Date(recommendation.last_indexed);
-                for await (const batch of readChangedFilesInBatches(rootPathCopy, sinceDate, { batchSize: 50 })) {
+                for await (const batch of readChangedFilesInBatches(rootPathCopy, sinceDate, {
+                  batchSize: 50,
+                })) {
                   await this.ingestFiles(projectIdCopy, batch);
                 }
-                console.error(`[ContextStream] Long session incremental re-index completed for ${rootPathCopy}`);
+                console.error(
+                  `[ContextStream] Long session incremental re-index completed for ${rootPathCopy}`
+                );
               } else {
                 for await (const batch of readAllFilesInBatches(rootPathCopy, { batchSize: 50 })) {
                   await this.ingestFiles(projectIdCopy, batch);
                 }
-                console.error(`[ContextStream] Long session full re-index completed for ${rootPathCopy}`);
+                console.error(
+                  `[ContextStream] Long session full re-index completed for ${rootPathCopy}`
+                );
               }
             } finally {
               this.indexRefreshInProgress = false;
@@ -2799,7 +3080,7 @@ export class ContextStreamClient {
     }
 
     try {
-      const apiResult = await request(this.config, '/context/smart', {
+      const apiResult = await request(this.config, "/context/smart", {
         body: {
           user_message: params.user_message,
           workspace_id: withDefaults.workspace_id,
@@ -2823,15 +3104,17 @@ export class ContextStreamClient {
       }
 
       return {
-        context: String(data?.context ?? ''),
-        token_estimate: Number(data?.token_estimate ?? Math.ceil(String(data?.context ?? '').length / 4)),
+        context: String(data?.context ?? ""),
+        token_estimate: Number(
+          data?.token_estimate ?? Math.ceil(String(data?.context ?? "").length / 4)
+        ),
         format: String(data?.format ?? format),
         sources_used: Number(data?.sources_used ?? 0),
         workspace_id: withDefaults.workspace_id,
         project_id: withDefaults.project_id,
         ...(versionNotice ? { version_notice: versionNotice } : {}),
         ...(Array.isArray(data?.errors) ? { errors: data.errors } : {}),
-        ...(this.indexRefreshInProgress ? { index_status: 'refreshing' as const } : {}),
+        ...(this.indexRefreshInProgress ? { index_status: "refreshing" as const } : {}),
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -2841,7 +3124,7 @@ export class ContextStreamClient {
     // Extract keywords from user message for targeted search
     const message = params.user_message.toLowerCase();
     const keywords = this.extractKeywords(message);
-    
+
     // Collect context items
     const items: Array<{ type: string; key: string; value: string; relevance: number }> = [];
     const errors: string[] = [];
@@ -2852,15 +3135,25 @@ export class ContextStreamClient {
       const ws = unwrapApiResponse<{ name?: string }>(wsResponse);
       const workspaceName = pickString(ws?.name);
       if (workspaceName) {
-        items.push({ type: 'W', key: 'workspace', value: workspaceName, relevance: 1 });
+        items.push({ type: "W", key: "workspace", value: workspaceName, relevance: 1 });
       } else {
         // Workspace exists but no name - still indicate we have context
-        items.push({ type: 'W', key: 'workspace', value: `id:${withDefaults.workspace_id}`, relevance: 1 });
+        items.push({
+          type: "W",
+          key: "workspace",
+          value: `id:${withDefaults.workspace_id}`,
+          relevance: 1,
+        });
       }
     } catch (e) {
-      errors.push(`workspace: ${(e as Error)?.message || 'fetch failed'}`);
+      errors.push(`workspace: ${(e as Error)?.message || "fetch failed"}`);
       // Still add workspace ID so we know context exists
-      items.push({ type: 'W', key: 'workspace', value: `id:${withDefaults.workspace_id}`, relevance: 0.5 });
+      items.push({
+        type: "W",
+        key: "workspace",
+        value: `id:${withDefaults.workspace_id}`,
+        relevance: 0.5,
+      });
     }
 
     if (withDefaults.project_id) {
@@ -2869,62 +3162,62 @@ export class ContextStreamClient {
         const proj = unwrapApiResponse<{ name?: string }>(projResponse);
         const projectName = pickString(proj?.name);
         if (projectName) {
-          items.push({ type: 'P', key: 'project', value: projectName, relevance: 1 });
+          items.push({ type: "P", key: "project", value: projectName, relevance: 1 });
         }
       } catch (e) {
-        errors.push(`project: ${(e as Error)?.message || 'fetch failed'}`);
+        errors.push(`project: ${(e as Error)?.message || "fetch failed"}`);
       }
     }
 
     // 2. Get decisions (prioritize based on keyword match)
     try {
-      const decisions = await this.memoryDecisions({
+      const decisions = (await this.memoryDecisions({
         workspace_id: withDefaults.workspace_id,
         project_id: withDefaults.project_id,
         limit: 10,
-      }) as { items?: Array<{ title?: string; content?: string }> };
+      })) as { items?: Array<{ title?: string; content?: string }> };
 
       if (decisions.items) {
         for (const d of decisions.items) {
-          const title = d.title || '';
-          const content = d.content || '';
-          const relevance = this.calculateRelevance(keywords, title + ' ' + content);
+          const title = d.title || "";
+          const content = d.content || "";
+          const relevance = this.calculateRelevance(keywords, title + " " + content);
           items.push({
-            type: 'D',
-            key: 'decision',
+            type: "D",
+            key: "decision",
             value: title.slice(0, 80),
             relevance,
           });
         }
       }
     } catch (e) {
-      errors.push(`decisions: ${(e as Error)?.message || 'fetch failed'}`);
+      errors.push(`decisions: ${(e as Error)?.message || "fetch failed"}`);
     }
-    
+
     // 3. Search memory for query-relevant items
     if (keywords.length > 0) {
       try {
-        const memory = await this.memorySearch({
+        const memory = (await this.memorySearch({
           query: params.user_message.slice(0, 200),
           workspace_id: withDefaults.workspace_id,
           project_id: withDefaults.project_id,
           limit: 5,
-        }) as { results?: Array<{ title?: string; content?: string }> };
+        })) as { results?: Array<{ title?: string; content?: string }> };
 
         if (memory.results) {
           for (const m of memory.results) {
-            const title = m.title || '';
-            const content = m.content || '';
+            const title = m.title || "";
+            const content = m.content || "";
             items.push({
-              type: 'M',
-              key: 'memory',
-              value: title.slice(0, 80) + (content ? ': ' + content.slice(0, 100) : ''),
+              type: "M",
+              key: "memory",
+              value: title.slice(0, 80) + (content ? ": " + content.slice(0, 100) : ""),
               relevance: 0.8, // Memory search already ranked by relevance
             });
           }
         }
       } catch (e) {
-        errors.push(`memory: ${(e as Error)?.message || 'search failed'}`);
+        errors.push(`memory: ${(e as Error)?.message || "search failed"}`);
       }
     }
 
@@ -2939,21 +3232,21 @@ export class ContextStreamClient {
 
       for (const lesson of lessons) {
         // Use L for Lesson type, add warning emoji for critical
-        const prefix = lesson.severity === 'critical' ? '⚠️ ' : '';
+        const prefix = lesson.severity === "critical" ? "⚠️ " : "";
         items.push({
-          type: 'L',
-          key: 'lesson',
+          type: "L",
+          key: "lesson",
           value: `${prefix}${lesson.title}: ${lesson.prevention.slice(0, 100)}`,
-          relevance: lesson.severity === 'critical' ? 1.0 : 0.9, // Lessons are high priority
+          relevance: lesson.severity === "critical" ? 1.0 : 0.9, // Lessons are high priority
         });
       }
     } catch (e) {
-      errors.push(`lessons: ${(e as Error)?.message || 'fetch failed'}`);
+      errors.push(`lessons: ${(e as Error)?.message || "fetch failed"}`);
     }
 
     // Log errors for debugging if any occurred
     if (errors.length > 0) {
-      console.error('[ContextStream] context_smart errors:', errors.join(', '));
+      console.error("[ContextStream] context_smart errors:", errors.join(", "));
     }
 
     // Sort by relevance
@@ -2967,10 +3260,12 @@ export class ContextStreamClient {
 
     // Critical rule prefix - MUST appear FIRST before any context data
     // This ensures AI sees the ContextStream-first search requirement prominently
-    const CS_FIRST_RULE = '⚠️ STOP: Before Glob/Grep/Read → search(mode=hybrid) FIRST. Local tools ONLY if 0 results.';
-    const CS_FIRST_RULE_MINIFIED = 'R:CS-first|Idx:project.index_status->ingest|NoLocalScanUnlessCSempty';
+    const CS_FIRST_RULE =
+      "⚠️ STOP: Before Glob/Grep/Read → search(mode=hybrid) FIRST. Local tools ONLY if 0 results.";
+    const CS_FIRST_RULE_MINIFIED =
+      "R:CS-first|Idx:project.index_status->ingest|NoLocalScanUnlessCSempty";
 
-    if (format === 'minified') {
+    if (format === "minified") {
       // Ultra-compact format: Rule prefix + TYPE:value|TYPE:value|...
       const parts: string[] = [CS_FIRST_RULE_MINIFIED];
       charsUsed = CS_FIRST_RULE_MINIFIED.length + 1;
@@ -2980,9 +3275,11 @@ export class ContextStreamClient {
         parts.push(entry);
         charsUsed += entry.length + 1;
       }
-      context = parts.join('|');
-      candidateContext = [CS_FIRST_RULE_MINIFIED, ...items.map((i) => `${i.type}:${i.value}`)].join('|');
-    } else if (format === 'structured') {
+      context = parts.join("|");
+      candidateContext = [CS_FIRST_RULE_MINIFIED, ...items.map((i) => `${i.type}:${i.value}`)].join(
+        "|"
+      );
+    } else if (format === "structured") {
       // JSON-like compact format with rule prefix
       const grouped: Record<string, string[]> = { R: [CS_FIRST_RULE] };
       charsUsed = CS_FIRST_RULE.length + 10;
@@ -3002,7 +3299,7 @@ export class ContextStreamClient {
       candidateContext = JSON.stringify(candidateGrouped);
     } else {
       // Readable format (default) with rule prefix at top
-      const lines: string[] = [CS_FIRST_RULE, '', '[CTX]'];
+      const lines: string[] = [CS_FIRST_RULE, "", "[CTX]"];
       charsUsed = CS_FIRST_RULE.length + 10;
       for (const item of items) {
         const line = `${item.type}:${item.value}`;
@@ -3010,23 +3307,24 @@ export class ContextStreamClient {
         lines.push(line);
         charsUsed += line.length + 1;
       }
-      lines.push('[/CTX]');
-      context = lines.join('\n');
+      lines.push("[/CTX]");
+      context = lines.join("\n");
 
-      const candidateLines: string[] = [CS_FIRST_RULE, '', '[CTX]'];
+      const candidateLines: string[] = [CS_FIRST_RULE, "", "[CTX]"];
       for (const item of items) {
         candidateLines.push(`${item.type}:${item.value}`);
       }
-      candidateLines.push('[/CTX]');
-      candidateContext = candidateLines.join('\n');
+      candidateLines.push("[/CTX]");
+      candidateContext = candidateLines.join("\n");
     }
-    
+
     // If context is empty but we have workspace, add a hint (still include critical rule)
     if (context.length === 0 && withDefaults.workspace_id) {
-      const wsHint = items.find(i => i.type === 'W')?.value || withDefaults.workspace_id;
-      context = format === 'minified'
-        ? `${CS_FIRST_RULE_MINIFIED}|W:${wsHint}|[NO_MATCHES]`
-        : `${CS_FIRST_RULE}\n\n[CTX]\nW:${wsHint}\n[NO_MATCHES]\n[/CTX]`;
+      const wsHint = items.find((i) => i.type === "W")?.value || withDefaults.workspace_id;
+      context =
+        format === "minified"
+          ? `${CS_FIRST_RULE_MINIFIED}|W:${wsHint}|[NO_MATCHES]`
+          : `${CS_FIRST_RULE}\n\n[CTX]\nW:${wsHint}\n[NO_MATCHES]\n[/CTX]`;
       candidateContext = context;
     }
 
@@ -3038,7 +3336,7 @@ export class ContextStreamClient {
     }
 
     this.trackTokenSavings({
-      tool: 'context_smart',
+      tool: "context_smart",
       workspace_id: withDefaults.workspace_id,
       project_id: withDefaults.project_id,
       candidate_chars: candidateContext.length,
@@ -3056,12 +3354,12 @@ export class ContextStreamClient {
       context,
       token_estimate: Math.ceil(context.length / 4),
       format,
-      sources_used: items.filter(i => context.includes(i.value.slice(0, 20))).length,
+      sources_used: items.filter((i) => context.includes(i.value.slice(0, 20))).length,
       workspace_id: withDefaults.workspace_id,
       project_id: withDefaults.project_id,
       ...(versionNotice ? { version_notice: versionNotice } : {}),
       ...(errors.length > 0 && { errors }), // Include errors for debugging
-      ...(this.indexRefreshInProgress ? { index_status: 'refreshing' as const } : {}),
+      ...(this.indexRefreshInProgress ? { index_status: "refreshing" as const } : {}),
     };
   }
 
@@ -3074,30 +3372,34 @@ export class ContextStreamClient {
     project_id?: string;
     context_hint?: string;
     limit?: number;
-  }): Promise<Array<{
-    title: string;
-    severity: string;
-    category: string;
-    prevention: string;
-  }>> {
+  }): Promise<
+    Array<{
+      title: string;
+      severity: string;
+      category: string;
+      prevention: string;
+    }>
+  > {
     const limit = params.limit || 5;
 
     try {
       // Search for lessons, prioritizing those relevant to the context
       const searchQuery = params.context_hint
         ? `${params.context_hint} lesson warning prevention mistake`
-        : 'lesson warning prevention mistake critical high';
+        : "lesson warning prevention mistake critical high";
 
-      const searchResult = await this.memorySearch({
+      const searchResult = (await this.memorySearch({
         query: searchQuery,
         workspace_id: params.workspace_id,
         project_id: params.project_id,
         limit: limit * 2, // Fetch more to filter
-      }) as { results?: Array<{
-        title?: string;
-        content?: string;
-        metadata?: { tags?: string[]; importance?: string };
-      }> };
+      })) as {
+        results?: Array<{
+          title?: string;
+          content?: string;
+          metadata?: { tags?: string[]; importance?: string };
+        }>;
+      };
 
       if (!searchResult?.results) return [];
 
@@ -3105,30 +3407,37 @@ export class ContextStreamClient {
       const lessons = searchResult.results
         .filter((item) => {
           const tags = item.metadata?.tags || [];
-          const isLesson = tags.includes('lesson') || tags.includes('lesson_system');
+          const isLesson = tags.includes("lesson") || tags.includes("lesson_system");
           if (!isLesson) return false;
 
           // Get severity from tags or importance
-          const severityTag = tags.find((t: string) => t.startsWith('severity:'));
-          const severity = severityTag?.split(':')[1] || item.metadata?.importance || 'medium';
-          return severity === 'critical' || severity === 'high';
+          const severityTag = tags.find((t: string) => t.startsWith("severity:"));
+          const severity = severityTag?.split(":")[1] || item.metadata?.importance || "medium";
+          return severity === "critical" || severity === "high";
         })
         .slice(0, limit)
         .map((item) => {
           const tags = item.metadata?.tags || [];
-          const severityTag = tags.find((t: string) => t.startsWith('severity:'));
-          const severity = severityTag?.split(':')[1] || item.metadata?.importance || 'medium';
-          const category = tags.find((t: string) =>
-            ['workflow', 'code_quality', 'verification', 'communication', 'project_specific'].includes(t)
-          ) || 'unknown';
+          const severityTag = tags.find((t: string) => t.startsWith("severity:"));
+          const severity = severityTag?.split(":")[1] || item.metadata?.importance || "medium";
+          const category =
+            tags.find((t: string) =>
+              [
+                "workflow",
+                "code_quality",
+                "verification",
+                "communication",
+                "project_specific",
+              ].includes(t)
+            ) || "unknown";
 
           // Extract prevention from content
-          const content = item.content || '';
+          const content = item.content || "";
           const preventionMatch = content.match(/### Prevention\n([\s\S]*?)(?:\n\n|\n\*\*|$)/);
           const prevention = preventionMatch?.[1]?.trim() || content.slice(0, 200);
 
           return {
-            title: item.title || 'Lesson',
+            title: item.title || "Lesson",
             severity,
             category,
             prevention,
@@ -3147,24 +3456,112 @@ export class ContextStreamClient {
   private extractKeywords(message: string): string[] {
     // Remove common words and extract meaningful terms
     const stopWords = new Set([
-      'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-      'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-      'should', 'may', 'might', 'must', 'can', 'to', 'of', 'in', 'for',
-      'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during',
-      'before', 'after', 'above', 'below', 'between', 'under', 'again',
-      'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why',
-      'how', 'all', 'each', 'few', 'more', 'most', 'other', 'some', 'such',
-      'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
-      'just', 'and', 'but', 'if', 'or', 'because', 'until', 'while', 'this',
-      'that', 'these', 'those', 'what', 'which', 'who', 'whom', 'i', 'me',
-      'my', 'we', 'our', 'you', 'your', 'he', 'she', 'it', 'they', 'them',
+      "the",
+      "a",
+      "an",
+      "is",
+      "are",
+      "was",
+      "were",
+      "be",
+      "been",
+      "being",
+      "have",
+      "has",
+      "had",
+      "do",
+      "does",
+      "did",
+      "will",
+      "would",
+      "could",
+      "should",
+      "may",
+      "might",
+      "must",
+      "can",
+      "to",
+      "of",
+      "in",
+      "for",
+      "on",
+      "with",
+      "at",
+      "by",
+      "from",
+      "as",
+      "into",
+      "through",
+      "during",
+      "before",
+      "after",
+      "above",
+      "below",
+      "between",
+      "under",
+      "again",
+      "further",
+      "then",
+      "once",
+      "here",
+      "there",
+      "when",
+      "where",
+      "why",
+      "how",
+      "all",
+      "each",
+      "few",
+      "more",
+      "most",
+      "other",
+      "some",
+      "such",
+      "no",
+      "nor",
+      "not",
+      "only",
+      "own",
+      "same",
+      "so",
+      "than",
+      "too",
+      "very",
+      "just",
+      "and",
+      "but",
+      "if",
+      "or",
+      "because",
+      "until",
+      "while",
+      "this",
+      "that",
+      "these",
+      "those",
+      "what",
+      "which",
+      "who",
+      "whom",
+      "i",
+      "me",
+      "my",
+      "we",
+      "our",
+      "you",
+      "your",
+      "he",
+      "she",
+      "it",
+      "they",
+      "them",
     ]);
-    
+
     return message
       .toLowerCase()
-      .replace(/[^\w\s]/g, ' ')
+      .replace(/[^\w\s]/g, " ")
       .split(/\s+/)
-      .filter(word => word.length > 2 && !stopWords.has(word));
+      .filter((word) => word.length > 2 && !stopWords.has(word));
   }
 
   /**
@@ -3191,10 +3588,7 @@ export class ContextStreamClient {
   /**
    * Get Slack integration statistics and overview
    */
-  async slackStats(params: {
-    workspace_id?: string;
-    days?: number;
-  }): Promise<{
+  async slackStats(params: { workspace_id?: string; days?: number }): Promise<{
     summary: {
       total_messages: number;
       total_threads: number;
@@ -3222,22 +3616,20 @@ export class ContextStreamClient {
   }> {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for Slack stats');
+      throw new Error("workspace_id is required for Slack stats");
     }
     const query = new URLSearchParams();
-    if (params?.days) query.set('days', String(params.days));
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/stats${suffix}`, { method: 'GET' });
+    if (params?.days) query.set("days", String(params.days));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/stats${suffix}`, {
+      method: "GET",
+    });
   }
 
   /**
    * Get Slack users for a workspace
    */
-  async slackUsers(params: {
-    workspace_id?: string;
-    page?: number;
-    per_page?: number;
-  }): Promise<{
+  async slackUsers(params: { workspace_id?: string; page?: number; per_page?: number }): Promise<{
     items: Array<{
       id: string;
       slack_user_id: string;
@@ -3256,32 +3648,36 @@ export class ContextStreamClient {
   }> {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for Slack users');
+      throw new Error("workspace_id is required for Slack users");
     }
     const query = new URLSearchParams();
-    if (params?.page) query.set('page', String(params.page));
-    if (params?.per_page) query.set('per_page', String(params.per_page));
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/users${suffix}`, { method: 'GET' });
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.per_page) query.set("per_page", String(params.per_page));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/users${suffix}`, {
+      method: "GET",
+    });
   }
 
   /**
    * Get Slack channels with stats
    */
-  async slackChannels(params: {
-    workspace_id?: string;
-  }): Promise<Array<{
-    channel_id: string;
-    channel_name: string;
-    message_count: number;
-    thread_count: number;
-    last_message_at: string | null;
-  }>> {
+  async slackChannels(params: { workspace_id?: string }): Promise<
+    Array<{
+      channel_id: string;
+      channel_name: string;
+      message_count: number;
+      thread_count: number;
+      last_message_at: string | null;
+    }>
+  > {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for Slack channels');
+      throw new Error("workspace_id is required for Slack channels");
     }
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/channels`, { method: 'GET' });
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/channels`, {
+      method: "GET",
+    });
   }
 
   /**
@@ -3292,130 +3688,144 @@ export class ContextStreamClient {
     limit?: number;
     offset?: number;
     channel_id?: string;
-  }): Promise<Array<{
-    id: string;
-    channel_id: string;
-    channel_name: string;
-    user_id: string | null;
-    user_name: string | null;
-    user_avatar: string | null;
-    content: string;
-    content_preview: string | null;
-    occurred_at: string;
-    reply_count: number;
-    reaction_count: number;
-    thread_ts: string | null;
-  }>> {
+  }): Promise<
+    Array<{
+      id: string;
+      channel_id: string;
+      channel_name: string;
+      user_id: string | null;
+      user_name: string | null;
+      user_avatar: string | null;
+      content: string;
+      content_preview: string | null;
+      occurred_at: string;
+      reply_count: number;
+      reaction_count: number;
+      thread_ts: string | null;
+    }>
+  > {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for Slack activity');
+      throw new Error("workspace_id is required for Slack activity");
     }
     const query = new URLSearchParams();
-    if (params?.limit) query.set('limit', String(params.limit));
-    if (params?.offset) query.set('offset', String(params.offset));
-    if (params?.channel_id) query.set('channel_id', params.channel_id);
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/activity${suffix}`, { method: 'GET' });
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.offset) query.set("offset", String(params.offset));
+    if (params?.channel_id) query.set("channel_id", params.channel_id);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(
+      this.config,
+      `/workspaces/${withDefaults.workspace_id}/slack/activity${suffix}`,
+      { method: "GET" }
+    );
   }
 
   /**
    * Get high-engagement Slack discussions
    */
-  async slackDiscussions(params: {
-    workspace_id?: string;
-    limit?: number;
-  }): Promise<Array<{
-    id: string;
-    channel_id: string;
-    channel_name: string;
-    content_preview: string;
-    reply_count: number;
-    reaction_count: number;
-    participant_count: number;
-    occurred_at: string;
-  }>> {
+  async slackDiscussions(params: { workspace_id?: string; limit?: number }): Promise<
+    Array<{
+      id: string;
+      channel_id: string;
+      channel_name: string;
+      content_preview: string;
+      reply_count: number;
+      reaction_count: number;
+      participant_count: number;
+      occurred_at: string;
+    }>
+  > {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for Slack discussions');
+      throw new Error("workspace_id is required for Slack discussions");
     }
     const query = new URLSearchParams();
-    if (params?.limit) query.set('limit', String(params.limit));
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/discussions${suffix}`, { method: 'GET' });
+    if (params?.limit) query.set("limit", String(params.limit));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(
+      this.config,
+      `/workspaces/${withDefaults.workspace_id}/slack/discussions${suffix}`,
+      { method: "GET" }
+    );
   }
 
   /**
    * Get top Slack contributors
    */
-  async slackContributors(params: {
-    workspace_id?: string;
-    limit?: number;
-  }): Promise<Array<{
-    id: string;
-    slack_user_id: string;
-    display_name: string | null;
-    real_name: string | null;
-    email: string | null;
-    avatar_url: string | null;
-    is_bot: boolean;
-    message_count: number;
-    last_message_at: string | null;
-  }>> {
+  async slackContributors(params: { workspace_id?: string; limit?: number }): Promise<
+    Array<{
+      id: string;
+      slack_user_id: string;
+      display_name: string | null;
+      real_name: string | null;
+      email: string | null;
+      avatar_url: string | null;
+      is_bot: boolean;
+      message_count: number;
+      last_message_at: string | null;
+    }>
+  > {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for Slack contributors');
+      throw new Error("workspace_id is required for Slack contributors");
     }
     const query = new URLSearchParams();
-    if (params?.limit) query.set('limit', String(params.limit));
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/contributors${suffix}`, { method: 'GET' });
+    if (params?.limit) query.set("limit", String(params.limit));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(
+      this.config,
+      `/workspaces/${withDefaults.workspace_id}/slack/contributors${suffix}`,
+      { method: "GET" }
+    );
   }
 
   /**
    * Trigger a sync of Slack user profiles
    */
-  async slackSyncUsers(params: {
-    workspace_id?: string;
-  }): Promise<{
+  async slackSyncUsers(params: { workspace_id?: string }): Promise<{
     synced_users: number;
     auto_mapped: number;
   }> {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for syncing Slack users');
+      throw new Error("workspace_id is required for syncing Slack users");
     }
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/sync-users`, { method: 'POST' });
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/sync-users`, {
+      method: "POST",
+    });
   }
 
   /**
    * Search Slack messages
    */
-  async slackSearch(params: {
-    workspace_id?: string;
-    q: string;
-    limit?: number;
-  }): Promise<Array<{
-    id: string;
-    channel_id: string;
-    channel_name: string;
-    user_id: string | null;
-    user_name: string | null;
-    user_avatar: string | null;
-    content: string;
-    content_preview: string | null;
-    occurred_at: string;
-    reply_count: number;
-    reaction_count: number;
-    thread_ts: string | null;
-  }>> {
+  async slackSearch(params: { workspace_id?: string; q: string; limit?: number }): Promise<
+    Array<{
+      id: string;
+      channel_id: string;
+      channel_name: string;
+      user_id: string | null;
+      user_name: string | null;
+      user_avatar: string | null;
+      content: string;
+      content_preview: string | null;
+      occurred_at: string;
+      reply_count: number;
+      reaction_count: number;
+      thread_ts: string | null;
+    }>
+  > {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for Slack search');
+      throw new Error("workspace_id is required for Slack search");
     }
     const query = new URLSearchParams();
-    query.set('q', params.q);
-    if (params?.limit) query.set('limit', String(params.limit));
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/search?${query.toString()}`, { method: 'GET' });
+    query.set("q", params.q);
+    if (params?.limit) query.set("limit", String(params.limit));
+    return request(
+      this.config,
+      `/workspaces/${withDefaults.workspace_id}/slack/search?${query.toString()}`,
+      { method: "GET" }
+    );
   }
 
   // ============================================
@@ -3425,9 +3835,7 @@ export class ContextStreamClient {
   /**
    * Get GitHub integration statistics and overview
    */
-  async githubStats(params: {
-    workspace_id?: string;
-  }): Promise<{
+  async githubStats(params: { workspace_id?: string }): Promise<{
     summary: {
       total_issues: number;
       total_prs: number;
@@ -3459,29 +3867,33 @@ export class ContextStreamClient {
   }> {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for GitHub stats');
+      throw new Error("workspace_id is required for GitHub stats");
     }
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/github/stats`, { method: 'GET' });
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/github/stats`, {
+      method: "GET",
+    });
   }
 
   /**
    * Get GitHub repository stats
    */
-  async githubRepos(params: {
-    workspace_id?: string;
-  }): Promise<Array<{
-    repo_name: string;
-    issue_count: number;
-    pr_count: number;
-    release_count: number;
-    comment_count: number;
-    last_activity_at: string | null;
-  }>> {
+  async githubRepos(params: { workspace_id?: string }): Promise<
+    Array<{
+      repo_name: string;
+      issue_count: number;
+      pr_count: number;
+      release_count: number;
+      comment_count: number;
+      last_activity_at: string | null;
+    }>
+  > {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for GitHub repos');
+      throw new Error("workspace_id is required for GitHub repos");
     }
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/github/repos`, { method: 'GET' });
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/github/repos`, {
+      method: "GET",
+    });
   }
 
   /**
@@ -3493,31 +3905,37 @@ export class ContextStreamClient {
     offset?: number;
     repo?: string;
     type?: string;
-  }): Promise<Array<{
-    id: string;
-    item_type: string;
-    repo: string;
-    number: number | null;
-    title: string;
-    content_preview: string | null;
-    state: string | null;
-    author: string | null;
-    url: string | null;
-    labels: string[];
-    comment_count: number;
-    occurred_at: string;
-  }>> {
+  }): Promise<
+    Array<{
+      id: string;
+      item_type: string;
+      repo: string;
+      number: number | null;
+      title: string;
+      content_preview: string | null;
+      state: string | null;
+      author: string | null;
+      url: string | null;
+      labels: string[];
+      comment_count: number;
+      occurred_at: string;
+    }>
+  > {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for GitHub activity');
+      throw new Error("workspace_id is required for GitHub activity");
     }
     const query = new URLSearchParams();
-    if (params?.limit) query.set('limit', String(params.limit));
-    if (params?.offset) query.set('offset', String(params.offset));
-    if (params?.repo) query.set('repo', params.repo);
-    if (params?.type) query.set('type', params.type);
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/github/activity${suffix}`, { method: 'GET' });
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.offset) query.set("offset", String(params.offset));
+    if (params?.repo) query.set("repo", params.repo);
+    if (params?.type) query.set("type", params.type);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(
+      this.config,
+      `/workspaces/${withDefaults.workspace_id}/github/activity${suffix}`,
+      { method: "GET" }
+    );
   }
 
   /**
@@ -3529,62 +3947,65 @@ export class ContextStreamClient {
     offset?: number;
     state?: string;
     repo?: string;
-  }): Promise<Array<{
-    id: string;
-    item_type: string;
-    repo: string;
-    number: number | null;
-    title: string;
-    content_preview: string | null;
-    state: string | null;
-    author: string | null;
-    url: string | null;
-    labels: string[];
-    comment_count: number;
-    occurred_at: string;
-  }>> {
+  }): Promise<
+    Array<{
+      id: string;
+      item_type: string;
+      repo: string;
+      number: number | null;
+      title: string;
+      content_preview: string | null;
+      state: string | null;
+      author: string | null;
+      url: string | null;
+      labels: string[];
+      comment_count: number;
+      occurred_at: string;
+    }>
+  > {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for GitHub issues');
+      throw new Error("workspace_id is required for GitHub issues");
     }
     const query = new URLSearchParams();
-    if (params?.limit) query.set('limit', String(params.limit));
-    if (params?.offset) query.set('offset', String(params.offset));
-    if (params?.state) query.set('state', params.state);
-    if (params?.repo) query.set('repo', params.repo);
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/github/issues${suffix}`, { method: 'GET' });
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.offset) query.set("offset", String(params.offset));
+    if (params?.state) query.set("state", params.state);
+    if (params?.repo) query.set("repo", params.repo);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/github/issues${suffix}`, {
+      method: "GET",
+    });
   }
 
   /**
    * Get top GitHub contributors
    */
-  async githubContributors(params: {
-    workspace_id?: string;
-    limit?: number;
-  }): Promise<Array<{
-    username: string;
-    contribution_count: number;
-    avatar_url: string | null;
-  }>> {
+  async githubContributors(params: { workspace_id?: string; limit?: number }): Promise<
+    Array<{
+      username: string;
+      contribution_count: number;
+      avatar_url: string | null;
+    }>
+  > {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for GitHub contributors');
+      throw new Error("workspace_id is required for GitHub contributors");
     }
     const query = new URLSearchParams();
-    if (params?.limit) query.set('limit', String(params.limit));
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/github/contributors${suffix}`, { method: 'GET' });
+    if (params?.limit) query.set("limit", String(params.limit));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(
+      this.config,
+      `/workspaces/${withDefaults.workspace_id}/github/contributors${suffix}`,
+      { method: "GET" }
+    );
   }
 
   /**
    * Search GitHub content
    */
-  async githubSearch(params: {
-    workspace_id?: string;
-    q: string;
-    limit?: number;
-  }): Promise<{
+  async githubSearch(params: { workspace_id?: string; q: string; limit?: number }): Promise<{
     items: Array<{
       id: string;
       item_type: string;
@@ -3603,12 +4024,16 @@ export class ContextStreamClient {
   }> {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for GitHub search');
+      throw new Error("workspace_id is required for GitHub search");
     }
     const query = new URLSearchParams();
-    query.set('q', params.q);
-    if (params?.limit) query.set('limit', String(params.limit));
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/github/search?${query.toString()}`, { method: 'GET' });
+    query.set("q", params.q);
+    if (params?.limit) query.set("limit", String(params.limit));
+    return request(
+      this.config,
+      `/workspaces/${withDefaults.workspace_id}/github/search?${query.toString()}`,
+      { method: "GET" }
+    );
   }
 
   /**
@@ -3618,25 +4043,31 @@ export class ContextStreamClient {
     workspace_id?: string;
     limit?: number;
     node_type?: string;
-  }): Promise<Array<{
-    id: string;
-    node_type: string;
-    title: string;
-    summary: string;
-    confidence: number;
-    source_type: string;
-    occurred_at: string;
-    tags: string[];
-  }>> {
+  }): Promise<
+    Array<{
+      id: string;
+      node_type: string;
+      title: string;
+      summary: string;
+      confidence: number;
+      source_type: string;
+      occurred_at: string;
+      tags: string[];
+    }>
+  > {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for GitHub knowledge');
+      throw new Error("workspace_id is required for GitHub knowledge");
     }
     const query = new URLSearchParams();
-    if (params?.limit) query.set('limit', String(params.limit));
-    if (params?.node_type) query.set('node_type', params.node_type);
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/github/knowledge${suffix}`, { method: 'GET' });
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.node_type) query.set("node_type", params.node_type);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(
+      this.config,
+      `/workspaces/${withDefaults.workspace_id}/github/knowledge${suffix}`,
+      { method: "GET" }
+    );
   }
 
   /**
@@ -3646,45 +4077,53 @@ export class ContextStreamClient {
     workspace_id?: string;
     limit?: number;
     node_type?: string;
-  }): Promise<Array<{
-    id: string;
-    node_type: string;
-    title: string;
-    summary: string;
-    confidence: number;
-    source_type: string;
-    occurred_at: string;
-    tags: string[];
-  }>> {
+  }): Promise<
+    Array<{
+      id: string;
+      node_type: string;
+      title: string;
+      summary: string;
+      confidence: number;
+      source_type: string;
+      occurred_at: string;
+      tags: string[];
+    }>
+  > {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for Slack knowledge');
+      throw new Error("workspace_id is required for Slack knowledge");
     }
     const query = new URLSearchParams();
-    if (params?.limit) query.set('limit', String(params.limit));
-    if (params?.node_type) query.set('node_type', params.node_type);
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/knowledge${suffix}`, { method: 'GET' });
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.node_type) query.set("node_type", params.node_type);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(
+      this.config,
+      `/workspaces/${withDefaults.workspace_id}/slack/knowledge${suffix}`,
+      { method: "GET" }
+    );
   }
 
   /**
    * Get integration status for all providers in a workspace
    */
-  async integrationsStatus(params: {
-    workspace_id?: string;
-  }): Promise<Array<{
-    provider: string;
-    status: string;
-    last_sync_at: string | null;
-    next_sync_at: string | null;
-    error_message: string | null;
-    resources_synced: number;
-  }>> {
+  async integrationsStatus(params: { workspace_id?: string }): Promise<
+    Array<{
+      provider: string;
+      status: string;
+      last_sync_at: string | null;
+      next_sync_at: string | null;
+      error_message: string | null;
+      resources_synced: number;
+    }>
+  > {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for integrations status');
+      throw new Error("workspace_id is required for integrations status");
     }
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/integrations/status`, { method: 'GET' });
+    return request(this.config, `/workspaces/${withDefaults.workspace_id}/integrations/status`, {
+      method: "GET",
+    });
   }
 
   /**
@@ -3697,13 +4136,13 @@ export class ContextStreamClient {
   }): Promise<unknown> {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for GitHub summary');
+      throw new Error("workspace_id is required for GitHub summary");
     }
     const query = new URLSearchParams();
-    if (params?.days) query.set('days', String(params.days));
-    if (params?.repo) query.set('repo', params.repo);
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/github/summary${suffix}`, { method: 'GET' });
+    if (params?.days) query.set("days", String(params.days));
+    if (params?.repo) query.set("repo", params.repo);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(this.config, `/github/summary${suffix}`, { method: "GET" });
   }
 
   /**
@@ -3716,13 +4155,13 @@ export class ContextStreamClient {
   }): Promise<unknown> {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for Slack summary');
+      throw new Error("workspace_id is required for Slack summary");
     }
     const query = new URLSearchParams();
-    if (params?.days) query.set('days', String(params.days));
-    if (params?.channel) query.set('channel', params.channel);
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/slack/summary${suffix}`, { method: 'GET' });
+    if (params?.days) query.set("days", String(params.days));
+    if (params?.channel) query.set("channel", params.channel);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(this.config, `/slack/summary${suffix}`, { method: "GET" });
   }
 
   /**
@@ -3738,33 +4177,30 @@ export class ContextStreamClient {
   }): Promise<unknown> {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for integrations search');
+      throw new Error("workspace_id is required for integrations search");
     }
     const urlParams = new URLSearchParams();
-    urlParams.set('q', params.query);
-    urlParams.set('workspace_id', withDefaults.workspace_id);
-    if (params?.limit) urlParams.set('limit', String(params.limit));
-    if (params?.sources) urlParams.set('sources', params.sources.join(','));
-    if (params?.days) urlParams.set('days', String(params.days));
-    if (params?.sort_by) urlParams.set('sort_by', params.sort_by);
-    return request(this.config, `/integrations/search?${urlParams.toString()}`, { method: 'GET' });
+    urlParams.set("q", params.query);
+    urlParams.set("workspace_id", withDefaults.workspace_id);
+    if (params?.limit) urlParams.set("limit", String(params.limit));
+    if (params?.sources) urlParams.set("sources", params.sources.join(","));
+    if (params?.days) urlParams.set("days", String(params.days));
+    if (params?.sort_by) urlParams.set("sort_by", params.sort_by);
+    return request(this.config, `/integrations/search?${urlParams.toString()}`, { method: "GET" });
   }
 
   /**
    * Cross-source summary across all integrations
    */
-  async integrationsSummary(params: {
-    workspace_id?: string;
-    days?: number;
-  }): Promise<unknown> {
+  async integrationsSummary(params: { workspace_id?: string; days?: number }): Promise<unknown> {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for integrations summary');
+      throw new Error("workspace_id is required for integrations summary");
     }
     const query = new URLSearchParams();
-    query.set('workspace_id', withDefaults.workspace_id);
-    if (params?.days) query.set('days', String(params.days));
-    return request(this.config, `/integrations/summary?${query.toString()}`, { method: 'GET' });
+    query.set("workspace_id", withDefaults.workspace_id);
+    if (params?.days) query.set("days", String(params.days));
+    return request(this.config, `/integrations/summary?${query.toString()}`, { method: "GET" });
   }
 
   /**
@@ -3779,15 +4215,17 @@ export class ContextStreamClient {
   }): Promise<unknown> {
     const withDefaults = this.withDefaults(params || {});
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for integrations knowledge');
+      throw new Error("workspace_id is required for integrations knowledge");
     }
     const urlParams = new URLSearchParams();
-    urlParams.set('workspace_id', withDefaults.workspace_id);
-    if (params?.knowledge_type) urlParams.set('knowledge_type', params.knowledge_type);
-    if (params?.query) urlParams.set('query', params.query);
-    if (params?.sources) urlParams.set('sources', params.sources.join(','));
-    if (params?.limit) urlParams.set('limit', String(params.limit));
-    return request(this.config, `/integrations/knowledge?${urlParams.toString()}`, { method: 'GET' });
+    urlParams.set("workspace_id", withDefaults.workspace_id);
+    if (params?.knowledge_type) urlParams.set("knowledge_type", params.knowledge_type);
+    if (params?.query) urlParams.set("query", params.query);
+    if (params?.sources) urlParams.set("sources", params.sources.join(","));
+    if (params?.limit) urlParams.set("limit", String(params.limit));
+    return request(this.config, `/integrations/knowledge?${urlParams.toString()}`, {
+      method: "GET",
+    });
   }
 
   // ============================================
@@ -3819,13 +4257,13 @@ export class ContextStreamClient {
   }> {
     const withDefaults = this.withDefaults(params || {});
     const query = new URLSearchParams();
-    if (withDefaults.workspace_id) query.set('workspace_id', withDefaults.workspace_id);
-    if (withDefaults.project_id) query.set('project_id', withDefaults.project_id);
-    if (params?.status) query.set('status', params.status);
-    if (params?.priority) query.set('priority', params.priority);
-    if (params?.limit) query.set('limit', String(params.limit));
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/reminders${suffix}`, { method: 'GET' });
+    if (withDefaults.workspace_id) query.set("workspace_id", withDefaults.workspace_id);
+    if (withDefaults.project_id) query.set("project_id", withDefaults.project_id);
+    if (params?.status) query.set("status", params.status);
+    if (params?.priority) query.set("priority", params.priority);
+    if (params?.limit) query.set("limit", String(params.limit));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(this.config, `/reminders${suffix}`, { method: "GET" });
   }
 
   /**
@@ -3851,12 +4289,12 @@ export class ContextStreamClient {
   }> {
     const withDefaults = this.withDefaults(params || {});
     const query = new URLSearchParams();
-    if (withDefaults.workspace_id) query.set('workspace_id', withDefaults.workspace_id);
-    if (withDefaults.project_id) query.set('project_id', withDefaults.project_id);
-    if (params?.context) query.set('context', params.context);
-    if (params?.limit) query.set('limit', String(params.limit));
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/reminders/active${suffix}`, { method: 'GET' });
+    if (withDefaults.workspace_id) query.set("workspace_id", withDefaults.workspace_id);
+    if (withDefaults.project_id) query.set("project_id", withDefaults.project_id);
+    if (params?.context) query.set("context", params.context);
+    if (params?.limit) query.set("limit", String(params.limit));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(this.config, `/reminders/active${suffix}`, { method: "GET" });
   }
 
   /**
@@ -3881,14 +4319,14 @@ export class ContextStreamClient {
     status: string;
   }> {
     const withDefaults = this.withDefaults(params);
-    return request(this.config, '/reminders', {
+    return request(this.config, "/reminders", {
       body: {
         workspace_id: withDefaults.workspace_id,
         project_id: withDefaults.project_id,
         title: params.title,
         content: params.content,
         remind_at: params.remind_at,
-        priority: params.priority || 'normal',
+        priority: params.priority || "normal",
         keywords: params.keywords || [],
         recurrence: params.recurrence,
         memory_event_id: params.memory_event_id,
@@ -3916,7 +4354,7 @@ export class ContextStreamClient {
     reminder_id: string;
   }): Promise<{ id: string; status: string; completed_at: string }> {
     uuidSchema.parse(params.reminder_id);
-    return request(this.config, `/reminders/${params.reminder_id}/complete`, { method: 'POST' });
+    return request(this.config, `/reminders/${params.reminder_id}/complete`, { method: "POST" });
   }
 
   /**
@@ -3926,17 +4364,15 @@ export class ContextStreamClient {
     reminder_id: string;
   }): Promise<{ id: string; status: string; dismissed_at: string }> {
     uuidSchema.parse(params.reminder_id);
-    return request(this.config, `/reminders/${params.reminder_id}/dismiss`, { method: 'POST' });
+    return request(this.config, `/reminders/${params.reminder_id}/dismiss`, { method: "POST" });
   }
 
   /**
    * Delete a reminder
    */
-  async remindersDelete(params: {
-    reminder_id: string;
-  }): Promise<{ success: boolean }> {
+  async remindersDelete(params: { reminder_id: string }): Promise<{ success: boolean }> {
     uuidSchema.parse(params.reminder_id);
-    return request(this.config, `/reminders/${params.reminder_id}`, { method: 'DELETE' });
+    return request(this.config, `/reminders/${params.reminder_id}`, { method: "DELETE" });
   }
 
   // ============================================
@@ -3953,17 +4389,23 @@ export class ContextStreamClient {
     content?: string;
     description?: string;
     goals?: string[];
-    steps?: Array<{ id: string; title: string; description?: string; order: number; estimated_effort?: string }>;
-    status?: 'draft' | 'active' | 'completed' | 'archived' | 'abandoned';
+    steps?: Array<{
+      id: string;
+      title: string;
+      description?: string;
+      order: number;
+      estimated_effort?: string;
+    }>;
+    status?: "draft" | "active" | "completed" | "archived" | "abandoned";
     tags?: string[];
     due_at?: string;
     source_tool?: string;
   }) {
     const withDefaults = this.withDefaults(params);
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for creating plans');
+      throw new Error("workspace_id is required for creating plans");
     }
-    return request(this.config, '/plans', { body: withDefaults });
+    return request(this.config, "/plans", { body: withDefaults });
   }
 
   /**
@@ -3978,27 +4420,24 @@ export class ContextStreamClient {
   }) {
     const withDefaults = this.withDefaults(params || {});
     const query = new URLSearchParams();
-    if (withDefaults.workspace_id) query.set('workspace_id', withDefaults.workspace_id);
-    if (withDefaults.project_id) query.set('project_id', withDefaults.project_id);
-    if (params?.status) query.set('status', params.status);
-    if (params?.limit) query.set('limit', String(params.limit));
-    if (params?.offset) query.set('offset', String(params.offset));
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/plans${suffix}`, { method: 'GET' });
+    if (withDefaults.workspace_id) query.set("workspace_id", withDefaults.workspace_id);
+    if (withDefaults.project_id) query.set("project_id", withDefaults.project_id);
+    if (params?.status) query.set("status", params.status);
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.offset) query.set("offset", String(params.offset));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(this.config, `/plans${suffix}`, { method: "GET" });
   }
 
   /**
    * Get a plan by ID, optionally including its tasks
    */
-  async getPlan(params: {
-    plan_id: string;
-    include_tasks?: boolean;
-  }) {
+  async getPlan(params: { plan_id: string; include_tasks?: boolean }) {
     uuidSchema.parse(params.plan_id);
     const query = new URLSearchParams();
-    if (params.include_tasks !== false) query.set('include_tasks', 'true');
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/plans/${params.plan_id}${suffix}`, { method: 'GET' });
+    if (params.include_tasks !== false) query.set("include_tasks", "true");
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(this.config, `/plans/${params.plan_id}${suffix}`, { method: "GET" });
   }
 
   /**
@@ -4010,34 +4449,36 @@ export class ContextStreamClient {
     content?: string;
     description?: string;
     goals?: string[];
-    steps?: Array<{ id: string; title: string; description?: string; order: number; estimated_effort?: string }>;
-    status?: 'draft' | 'active' | 'completed' | 'archived' | 'abandoned';
+    steps?: Array<{
+      id: string;
+      title: string;
+      description?: string;
+      order: number;
+      estimated_effort?: string;
+    }>;
+    status?: "draft" | "active" | "completed" | "archived" | "abandoned";
     tags?: string[];
     due_at?: string;
   }) {
     uuidSchema.parse(params.plan_id);
     const { plan_id, ...updates } = params;
-    return request(this.config, `/plans/${plan_id}`, { method: 'PATCH', body: updates });
+    return request(this.config, `/plans/${plan_id}`, { method: "PATCH", body: updates });
   }
 
   /**
    * Delete a plan
    */
-  async deletePlan(params: {
-    plan_id: string;
-  }) {
+  async deletePlan(params: { plan_id: string }) {
     uuidSchema.parse(params.plan_id);
-    return request(this.config, `/plans/${params.plan_id}`, { method: 'DELETE' });
+    return request(this.config, `/plans/${params.plan_id}`, { method: "DELETE" });
   }
 
   /**
    * Get tasks for a specific plan
    */
-  async getPlanTasks(params: {
-    plan_id: string;
-  }) {
+  async getPlanTasks(params: { plan_id: string }) {
     uuidSchema.parse(params.plan_id);
-    return request(this.config, `/plans/${params.plan_id}/tasks`, { method: 'GET' });
+    return request(this.config, `/plans/${params.plan_id}/tasks`, { method: "GET" });
   }
 
   /**
@@ -4048,8 +4489,8 @@ export class ContextStreamClient {
     title: string;
     content?: string;
     description?: string;
-    status?: 'pending' | 'in_progress' | 'completed' | 'blocked' | 'cancelled';
-    priority?: 'low' | 'medium' | 'high' | 'urgent';
+    status?: "pending" | "in_progress" | "completed" | "blocked" | "cancelled";
+    priority?: "low" | "medium" | "high" | "urgent";
     order?: number;
     plan_step_id?: string;
     code_refs?: Array<{ file_path: string; symbol_name?: string; line_range?: [number, number] }>;
@@ -4063,13 +4504,10 @@ export class ContextStreamClient {
   /**
    * Reorder tasks within a plan
    */
-  async reorderPlanTasks(params: {
-    plan_id: string;
-    task_ids: string[];
-  }) {
+  async reorderPlanTasks(params: { plan_id: string; task_ids: string[] }) {
     uuidSchema.parse(params.plan_id);
     return request(this.config, `/plans/${params.plan_id}/tasks/reorder`, {
-      method: 'PATCH',
+      method: "PATCH",
       body: { task_ids: params.task_ids },
     });
   }
@@ -4085,17 +4523,17 @@ export class ContextStreamClient {
     description?: string;
     plan_id?: string;
     plan_step_id?: string;
-    status?: 'pending' | 'in_progress' | 'completed' | 'blocked' | 'cancelled';
-    priority?: 'low' | 'medium' | 'high' | 'urgent';
+    status?: "pending" | "in_progress" | "completed" | "blocked" | "cancelled";
+    priority?: "low" | "medium" | "high" | "urgent";
     order?: number;
     code_refs?: Array<{ file_path: string; symbol_name?: string; line_range?: [number, number] }>;
     tags?: string[];
   }) {
     const withDefaults = this.withDefaults(params);
     if (!withDefaults.workspace_id) {
-      throw new Error('workspace_id is required for creating tasks');
+      throw new Error("workspace_id is required for creating tasks");
     }
-    return request(this.config, '/tasks', { body: withDefaults });
+    return request(this.config, "/tasks", { body: withDefaults });
   }
 
   /**
@@ -4112,25 +4550,23 @@ export class ContextStreamClient {
   }) {
     const withDefaults = this.withDefaults(params || {});
     const query = new URLSearchParams();
-    if (withDefaults.workspace_id) query.set('workspace_id', withDefaults.workspace_id);
-    if (withDefaults.project_id) query.set('project_id', withDefaults.project_id);
-    if (params?.plan_id) query.set('plan_id', params.plan_id);
-    if (params?.status) query.set('status', params.status);
-    if (params?.priority) query.set('priority', params.priority);
-    if (params?.limit) query.set('limit', String(params.limit));
-    if (params?.offset) query.set('offset', String(params.offset));
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request(this.config, `/tasks${suffix}`, { method: 'GET' });
+    if (withDefaults.workspace_id) query.set("workspace_id", withDefaults.workspace_id);
+    if (withDefaults.project_id) query.set("project_id", withDefaults.project_id);
+    if (params?.plan_id) query.set("plan_id", params.plan_id);
+    if (params?.status) query.set("status", params.status);
+    if (params?.priority) query.set("priority", params.priority);
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.offset) query.set("offset", String(params.offset));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(this.config, `/tasks${suffix}`, { method: "GET" });
   }
 
   /**
    * Get a task by ID
    */
-  async getTask(params: {
-    task_id: string;
-  }) {
+  async getTask(params: { task_id: string }) {
     uuidSchema.parse(params.task_id);
-    return request(this.config, `/tasks/${params.task_id}`, { method: 'GET' });
+    return request(this.config, `/tasks/${params.task_id}`, { method: "GET" });
   }
 
   /**
@@ -4141,8 +4577,8 @@ export class ContextStreamClient {
     title?: string;
     content?: string;
     description?: string;
-    status?: 'pending' | 'in_progress' | 'completed' | 'blocked' | 'cancelled';
-    priority?: 'low' | 'medium' | 'high' | 'urgent';
+    status?: "pending" | "in_progress" | "completed" | "blocked" | "cancelled";
+    priority?: "low" | "medium" | "high" | "urgent";
     order?: number;
     /** Link task to a plan (UUID) or set to null to unlink from current plan */
     plan_id?: string | null;
@@ -4154,16 +4590,14 @@ export class ContextStreamClient {
     uuidSchema.parse(params.task_id);
     if (params.plan_id) uuidSchema.parse(params.plan_id);
     const { task_id, ...updates } = params;
-    return request(this.config, `/tasks/${task_id}`, { method: 'PATCH', body: updates });
+    return request(this.config, `/tasks/${task_id}`, { method: "PATCH", body: updates });
   }
 
   /**
    * Delete a task
    */
-  async deleteTask(params: {
-    task_id: string;
-  }) {
+  async deleteTask(params: { task_id: string }) {
     uuidSchema.parse(params.task_id);
-    return request(this.config, `/tasks/${params.task_id}`, { method: 'DELETE' });
+    return request(this.config, `/tasks/${params.task_id}`, { method: "DELETE" });
   }
 }

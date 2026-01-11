@@ -1,28 +1,29 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { loadConfig, isMissingCredentialsError } from './config.js';
-import { ContextStreamClient } from './client.js';
-import { registerTools, setupClientDetection, registerLimitedTools } from './tools.js';
-import { registerResources } from './resources.js';
-import { registerPrompts } from './prompts.js';
-import { SessionManager } from './session-manager.js';
-import { runHttpGateway } from './http-gateway.js';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
-import { homedir } from 'os';
-import { join } from 'path';
-import { VERSION, checkForUpdates } from './version.js';
-import { runSetupWizard } from './setup.js';
-import { readSavedCredentials } from './credentials.js';
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { loadConfig, isMissingCredentialsError } from "./config.js";
+import { ContextStreamClient } from "./client.js";
+import { registerTools, setupClientDetection, registerLimitedTools } from "./tools.js";
+import { registerResources } from "./resources.js";
+import { registerPrompts } from "./prompts.js";
+import { SessionManager } from "./session-manager.js";
+import { runHttpGateway } from "./http-gateway.js";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
+import { VERSION, checkForUpdates } from "./version.js";
+import { runSetupWizard } from "./setup.js";
+import { readSavedCredentials } from "./credentials.js";
 
-const ENABLE_PROMPTS = (process.env.CONTEXTSTREAM_ENABLE_PROMPTS || 'true').toLowerCase() !== 'false';
+const ENABLE_PROMPTS =
+  (process.env.CONTEXTSTREAM_ENABLE_PROMPTS || "true").toLowerCase() !== "false";
 
 /**
  * Check if this is the first run and show star message if so.
  * Only shows once per install to avoid being annoying.
  */
 function showFirstRunMessage(): void {
-  const configDir = join(homedir(), '.contextstream');
-  const starShownFile = join(configDir, '.star-shown');
+  const configDir = join(homedir(), ".contextstream");
+  const starShownFile = join(configDir, ".star-shown");
 
   // Check if we've already shown the message
   if (existsSync(starShownFile)) {
@@ -40,13 +41,13 @@ function showFirstRunMessage(): void {
   }
 
   // Show the star message
-  console.error('');
-  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.error('⭐ If ContextStream saves you time, please star the MCP server repo:');
-  console.error('   https://github.com/contextstream/mcp-server');
-  console.error('   It helps others discover it!');
-  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.error('');
+  console.error("");
+  console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.error("⭐ If ContextStream saves you time, please star the MCP server repo:");
+  console.error("   https://github.com/contextstream/mcp-server");
+  console.error("   It helps others discover it!");
+  console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.error("");
 
   // Mark as shown
   try {
@@ -118,7 +119,7 @@ Notes:
  */
 async function runLimitedModeServer(): Promise<void> {
   const server = new McpServer({
-    name: 'contextstream-mcp',
+    name: "contextstream-mcp",
     version: VERSION,
   });
 
@@ -130,34 +131,34 @@ async function runLimitedModeServer(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  console.error('ContextStream MCP server connected (limited mode - setup required)');
+  console.error("ContextStream MCP server connected (limited mode - setup required)");
 }
 
 async function main() {
   const args = process.argv.slice(2);
 
-  if (args.includes('--help') || args.includes('-h')) {
+  if (args.includes("--help") || args.includes("-h")) {
     printHelp();
     return;
   }
 
-  if (args.includes('--version') || args.includes('-v')) {
+  if (args.includes("--version") || args.includes("-v")) {
     console.log(`contextstream-mcp v${VERSION}`);
     return;
   }
 
-  if (args[0] === 'setup') {
+  if (args[0] === "setup") {
     await runSetupWizard(args.slice(1));
     return;
   }
 
-  if (args[0] === 'http') {
+  if (args[0] === "http") {
     if (
       !process.env.CONTEXTSTREAM_API_KEY &&
       !process.env.CONTEXTSTREAM_JWT &&
       !process.env.CONTEXTSTREAM_ALLOW_HEADER_AUTH
     ) {
-      process.env.CONTEXTSTREAM_ALLOW_HEADER_AUTH = 'true';
+      process.env.CONTEXTSTREAM_ALLOW_HEADER_AUTH = "true";
     }
     await runHttpGateway();
     return;
@@ -188,7 +189,7 @@ async function main() {
   const client = new ContextStreamClient(config);
 
   const server = new McpServer({
-    name: 'contextstream-mcp',
+    name: "contextstream-mcp",
     version: VERSION,
   });
 
@@ -210,14 +211,14 @@ async function main() {
   // Log startup info (to stderr to not interfere with stdio protocol)
   console.error(`ContextStream MCP server v${VERSION} starting...`);
   console.error(`API URL: ${config.apiUrl}`);
-  console.error(`Auth: ${config.apiKey ? 'API Key' : config.jwt ? 'JWT' : 'None'}`);
+  console.error(`Auth: ${config.apiKey ? "API Key" : config.jwt ? "JWT" : "None"}`);
   console.error(`Auto-Context: ENABLED (context loads on first tool call)`);
 
   // Start stdio transport (works with Claude Code, Cursor, VS Code MCP config, Inspector)
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  console.error('ContextStream MCP server connected and ready');
+  console.error("ContextStream MCP server connected and ready");
 
   // Show first-run star message (only once per install)
   showFirstRunMessage();
@@ -229,6 +230,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('ContextStream MCP server failed to start:', err?.message || err);
+  console.error("ContextStream MCP server failed to start:", err?.message || err);
   process.exit(1);
 });

@@ -1,13 +1,13 @@
-import { z } from 'zod';
-import { VERSION } from './version.js';
+import { z } from "zod";
+import { VERSION } from "./version.js";
 
-const DEFAULT_API_URL = 'https://api.contextstream.io';
+const DEFAULT_API_URL = "https://api.contextstream.io";
 
 function parseBooleanEnv(value?: string): boolean | undefined {
   if (value === undefined) return undefined;
   const normalized = value.trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
-  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
   return undefined;
 }
 
@@ -24,7 +24,8 @@ const configSchema = z.object({
 
 export type Config = z.infer<typeof configSchema>;
 
-const MISSING_CREDENTIALS_ERROR = 'Set CONTEXTSTREAM_API_KEY or CONTEXTSTREAM_JWT for authentication (or CONTEXTSTREAM_ALLOW_HEADER_AUTH=true for header-based auth).';
+const MISSING_CREDENTIALS_ERROR =
+  "Set CONTEXTSTREAM_API_KEY or CONTEXTSTREAM_JWT for authentication (or CONTEXTSTREAM_ALLOW_HEADER_AUTH=true for header-based auth).";
 
 export function isMissingCredentialsError(err: unknown): boolean {
   if (err instanceof Error) {
@@ -35,9 +36,9 @@ export function isMissingCredentialsError(err: unknown): boolean {
 
 export function loadConfig(): Config {
   const allowHeaderAuth =
-    process.env.CONTEXTSTREAM_ALLOW_HEADER_AUTH === '1' ||
-    process.env.CONTEXTSTREAM_ALLOW_HEADER_AUTH === 'true' ||
-    process.env.CONTEXTSTREAM_ALLOW_HEADER_AUTH === 'yes';
+    process.env.CONTEXTSTREAM_ALLOW_HEADER_AUTH === "1" ||
+    process.env.CONTEXTSTREAM_ALLOW_HEADER_AUTH === "true" ||
+    process.env.CONTEXTSTREAM_ALLOW_HEADER_AUTH === "yes";
   const contextPackEnabled = parseBooleanEnv(
     process.env.CONTEXTSTREAM_CONTEXT_PACK ?? process.env.CONTEXTSTREAM_CONTEXT_PACK_ENABLED
   );
@@ -53,7 +54,7 @@ export function loadConfig(): Config {
   });
 
   if (!parsed.success) {
-    const missing = parsed.error.errors.map((e) => e.path.join('.')).join(', ');
+    const missing = parsed.error.errors.map((e) => e.path.join(".")).join(", ");
     throw new Error(
       `Invalid configuration. Set CONTEXTSTREAM_API_URL (and API key or JWT). Missing/invalid: ${missing}`
     );

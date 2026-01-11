@@ -14,23 +14,23 @@
  *   GET /tools - List available tools
  */
 
-import { createServer, IncomingMessage, ServerResponse } from 'http';
-import { spawn, ChildProcess } from 'child_process';
-import { createInterface, Interface } from 'readline';
-import { loadConfig } from './config.js';
-import { VERSION } from './version.js';
+import { createServer, IncomingMessage, ServerResponse } from "http";
+import { spawn, ChildProcess } from "child_process";
+import { createInterface, Interface } from "readline";
+import { loadConfig } from "./config.js";
+import { VERSION } from "./version.js";
 
-const PORT = parseInt(process.env.MCP_TEST_PORT || '3099', 10);
+const PORT = parseInt(process.env.MCP_TEST_PORT || "3099", 10);
 
 interface JsonRpcRequest {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: number;
   method: string;
   params?: unknown;
 }
 
 interface JsonRpcResponse {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: number;
   result?: unknown;
   error?: {
@@ -41,10 +41,13 @@ interface JsonRpcResponse {
 }
 
 // Pending requests map
-const pendingRequests = new Map<number, {
-  resolve: (value: JsonRpcResponse) => void;
-  reject: (error: Error) => void;
-}>();
+const pendingRequests = new Map<
+  number,
+  {
+    resolve: (value: JsonRpcResponse) => void;
+    reject: (error: Error) => void;
+  }
+>();
 
 let requestId = 0;
 let mcpProcess: ChildProcess | null = null;
@@ -57,27 +60,27 @@ let initialized = false;
 async function startMcpServer(): Promise<void> {
   const config = loadConfig();
 
-  console.log('[MCP Test Server] Starting MCP subprocess...');
+  console.log("[MCP Test Server] Starting MCP subprocess...");
   console.log(`[MCP Test Server] API URL: ${config.apiUrl}`);
-  console.log(`[MCP Test Server] Auth: ${config.apiKey ? 'API Key' : config.jwt ? 'JWT' : 'None'}`);
+  console.log(`[MCP Test Server] Auth: ${config.apiKey ? "API Key" : config.jwt ? "JWT" : "None"}`);
 
   // Build env vars, only including auth vars if they have values
   // (empty strings fail Zod's min(1) validation)
   const mcpEnv: Record<string, string> = {
-    ...process.env as Record<string, string>,
+    ...(process.env as Record<string, string>),
     CONTEXTSTREAM_API_URL: config.apiUrl,
   };
   if (config.apiKey) mcpEnv.CONTEXTSTREAM_API_KEY = config.apiKey;
   if (config.jwt) mcpEnv.CONTEXTSTREAM_JWT = config.jwt;
 
-  mcpProcess = spawn('node', ['dist/index.js'], {
+  mcpProcess = spawn("node", ["dist/index.js"], {
     cwd: process.cwd(),
     env: mcpEnv,
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: ["pipe", "pipe", "pipe"],
   });
 
   // Handle stderr (logs)
-  mcpProcess.stderr?.on('data', (data: Buffer) => {
+  mcpProcess.stderr?.on("data", (data: Buffer) => {
     const msg = data.toString().trim();
     if (msg) {
       console.log(`[MCP] ${msg}`);
@@ -90,7 +93,7 @@ async function startMcpServer(): Promise<void> {
     terminal: false,
   });
 
-  mcpReadline.on('line', (line: string) => {
+  mcpReadline.on("line", (line: string) => {
     try {
       const response = JSON.parse(line) as JsonRpcResponse;
       const pending = pendingRequests.get(response.id);
@@ -98,16 +101,16 @@ async function startMcpServer(): Promise<void> {
         pendingRequests.delete(response.id);
         pending.resolve(response);
       }
-    } catch (e) {
+    } catch {
       // Ignore non-JSON lines
     }
   });
 
-  mcpProcess.on('error', (err: Error) => {
-    console.error('[MCP Test Server] MCP process error:', err);
+  mcpProcess.on("error", (err: Error) => {
+    console.error("[MCP Test Server] MCP process error:", err);
   });
 
-  mcpProcess.on('exit', (code: number | null) => {
+  mcpProcess.on("exit", (code: number | null) => {
     console.log(`[MCP Test Server] MCP process exited with code ${code}`);
     mcpProcess = null;
     initialized = false;
@@ -125,12 +128,12 @@ async function startMcpServer(): Promise<void> {
  */
 async function sendRequest(method: string, params?: unknown): Promise<JsonRpcResponse> {
   if (!mcpProcess || !mcpProcess.stdin) {
-    throw new Error('MCP process not running');
+    throw new Error("MCP process not running");
   }
 
   const id = ++requestId;
   const request: JsonRpcRequest = {
-    jsonrpc: '2.0',
+    jsonrpc: "2.0",
     id,
     method,
     params,
@@ -141,10 +144,10 @@ async function sendRequest(method: string, params?: unknown): Promise<JsonRpcRes
 
     const timeoutId = setTimeout(() => {
       pendingRequests.delete(id);
-      reject(new Error('Request timeout'));
+      reject(new Error("Request timeout"));
     }, 30000);
 
-    mcpProcess!.stdin!.write(JSON.stringify(request) + '\n', (err: Error | null | undefined) => {
+    mcpProcess!.stdin!.write(JSON.stringify(request) + "\n", (err: Error | null | undefined) => {
       if (err) {
         clearTimeout(timeoutId);
         pendingRequests.delete(id);
@@ -164,13 +167,13 @@ async function sendRequest(method: string, params?: unknown): Promise<JsonRpcRes
  * Initialize the MCP connection
  */
 async function initializeMcp(): Promise<void> {
-  console.log('[MCP Test Server] Initializing MCP connection...');
+  console.log("[MCP Test Server] Initializing MCP connection...");
 
-  const response = await sendRequest('initialize', {
-    protocolVersion: '2024-11-05',
+  const response = await sendRequest("initialize", {
+    protocolVersion: "2024-11-05",
     capabilities: {},
     clientInfo: {
-      name: 'mcp-test-server',
+      name: "mcp-test-server",
       version: VERSION,
     },
   });
@@ -181,14 +184,16 @@ async function initializeMcp(): Promise<void> {
 
   // Send initialized notification
   if (mcpProcess?.stdin) {
-    mcpProcess.stdin.write(JSON.stringify({
-      jsonrpc: '2.0',
-      method: 'notifications/initialized',
-    }) + '\n');
+    mcpProcess.stdin.write(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+      }) + "\n"
+    );
   }
 
   initialized = true;
-  console.log('[MCP Test Server] MCP connection initialized');
+  console.log("[MCP Test Server] MCP connection initialized");
 }
 
 /**
@@ -199,7 +204,7 @@ async function callTool(toolName: string, args: Record<string, unknown>): Promis
     await initializeMcp();
   }
 
-  const response = await sendRequest('tools/call', {
+  const response = await sendRequest("tools/call", {
     name: toolName,
     arguments: args,
   });
@@ -219,7 +224,7 @@ async function listTools(): Promise<unknown> {
     await initializeMcp();
   }
 
-  const response = await sendRequest('tools/list', {});
+  const response = await sendRequest("tools/list", {});
 
   if (response.error) {
     throw new Error(response.error.message);
@@ -233,18 +238,18 @@ async function listTools(): Promise<unknown> {
  */
 async function parseBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', (chunk: Buffer) => {
+    let body = "";
+    req.on("data", (chunk: Buffer) => {
       body += chunk.toString();
     });
-    req.on('end', () => {
+    req.on("end", () => {
       try {
         resolve(body ? JSON.parse(body) : {});
-      } catch (e) {
-        reject(new Error('Invalid JSON'));
+      } catch {
+        reject(new Error("Invalid JSON"));
       }
     });
-    req.on('error', reject);
+    req.on("error", reject);
   });
 }
 
@@ -253,10 +258,10 @@ async function parseBody(req: IncomingMessage): Promise<unknown> {
  */
 function sendJson(res: ServerResponse, status: number, data: unknown): void {
   res.writeHead(status, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
   });
   res.end(JSON.stringify(data));
 }
@@ -265,14 +270,14 @@ function sendJson(res: ServerResponse, status: number, data: unknown): void {
  * HTTP request handler
  */
 async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const url = new URL(req.url || '/', `http://localhost:${PORT}`);
+  const url = new URL(req.url || "/", `http://localhost:${PORT}`);
 
   // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
+  if (req.method === "OPTIONS") {
     res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
     });
     res.end();
     return;
@@ -280,9 +285,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   try {
     // Health check
-    if (url.pathname === '/health') {
+    if (url.pathname === "/health") {
       sendJson(res, 200, {
-        status: 'ok',
+        status: "ok",
         version: VERSION,
         mcpRunning: mcpProcess !== null,
         initialized,
@@ -291,18 +296,18 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
 
     // List tools
-    if (url.pathname === '/tools' && req.method === 'GET') {
+    if (url.pathname === "/tools" && req.method === "GET") {
       const tools = await listTools();
       sendJson(res, 200, { success: true, data: tools });
       return;
     }
 
     // Test tool
-    if (url.pathname === '/test-tool' && req.method === 'POST') {
-      const body = await parseBody(req) as { tool?: string; arguments?: Record<string, unknown> };
+    if (url.pathname === "/test-tool" && req.method === "POST") {
+      const body = (await parseBody(req)) as { tool?: string; arguments?: Record<string, unknown> };
 
       if (!body.tool) {
-        sendJson(res, 400, { success: false, error: 'Missing tool name' });
+        sendJson(res, 400, { success: false, error: "Missing tool name" });
         return;
       }
 
@@ -320,10 +325,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
 
     // Not found
-    sendJson(res, 404, { success: false, error: 'Not found' });
+    sendJson(res, 404, { success: false, error: "Not found" });
   } catch (error: unknown) {
     const err = error as Error;
-    console.error('[MCP Test Server] Error:', err.message);
+    console.error("[MCP Test Server] Error:", err.message);
     sendJson(res, 500, {
       success: false,
       error: err.message,
@@ -343,7 +348,7 @@ async function main(): Promise<void> {
   // Create HTTP server
   const server = createServer(handleRequest);
 
-  server.listen(PORT, '0.0.0.0', () => {
+  server.listen(PORT, "0.0.0.0", () => {
     console.log(`[MCP Test Server] Listening on http://0.0.0.0:${PORT}`);
     console.log(`[MCP Test Server] Endpoints:`);
     console.log(`  GET  /health     - Health check`);
@@ -352,8 +357,8 @@ async function main(): Promise<void> {
   });
 
   // Handle shutdown
-  process.on('SIGINT', () => {
-    console.log('\n[MCP Test Server] Shutting down...');
+  process.on("SIGINT", () => {
+    console.log("\n[MCP Test Server] Shutting down...");
     if (mcpProcess) {
       mcpProcess.kill();
     }
@@ -363,6 +368,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error('[MCP Test Server] Fatal error:', err);
+  console.error("[MCP Test Server] Fatal error:", err);
   process.exit(1);
 });

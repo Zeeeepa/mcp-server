@@ -1,5 +1,5 @@
-import type { Config } from './config.js';
-import { getAuthOverride } from './auth-context.js';
+import type { Config } from "./config.js";
+import { getAuthOverride } from "./auth-context.js";
 
 export class HttpError extends Error {
   status: number;
@@ -8,7 +8,7 @@ export class HttpError extends Error {
 
   constructor(status: number, message: string, body?: any) {
     super(message);
-    this.name = 'HttpError';
+    this.name = "HttpError";
     this.status = status;
     this.body = body;
     this.code = statusToCode(status);
@@ -26,24 +26,37 @@ export class HttpError extends Error {
 
 function statusToCode(status: number): string {
   switch (status) {
-    case 0: return 'NETWORK_ERROR';
-    case 400: return 'BAD_REQUEST';
-    case 401: return 'UNAUTHORIZED';
-    case 403: return 'FORBIDDEN';
-    case 404: return 'NOT_FOUND';
-    case 409: return 'CONFLICT';
-    case 422: return 'VALIDATION_ERROR';
-    case 429: return 'RATE_LIMITED';
-    case 500: return 'INTERNAL_ERROR';
-    case 502: return 'BAD_GATEWAY';
-    case 503: return 'SERVICE_UNAVAILABLE';
-    case 504: return 'GATEWAY_TIMEOUT';
-    default: return 'UNKNOWN_ERROR';
+    case 0:
+      return "NETWORK_ERROR";
+    case 400:
+      return "BAD_REQUEST";
+    case 401:
+      return "UNAUTHORIZED";
+    case 403:
+      return "FORBIDDEN";
+    case 404:
+      return "NOT_FOUND";
+    case 409:
+      return "CONFLICT";
+    case 422:
+      return "VALIDATION_ERROR";
+    case 429:
+      return "RATE_LIMITED";
+    case 500:
+      return "INTERNAL_ERROR";
+    case 502:
+      return "BAD_GATEWAY";
+    case 503:
+      return "SERVICE_UNAVAILABLE";
+    case 504:
+      return "GATEWAY_TIMEOUT";
+    default:
+      return "UNKNOWN_ERROR";
   }
 }
 
 export interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: "GET" | "POST" | "PUT" | "DELETE";
   body?: any;
   signal?: AbortSignal;
   retries?: number;
@@ -75,31 +88,29 @@ export async function request<T>(
   const apiKey = authOverride?.apiKey ?? config.apiKey;
   const jwt = authOverride?.jwt ?? config.jwt;
   // Ensure path has /api/v1 prefix
-  const apiPath = path.startsWith('/api/') ? path : `/api/v1${path}`;
-  const url = `${apiUrl.replace(/\/$/, '')}${apiPath}`;
+  const apiPath = path.startsWith("/api/") ? path : `/api/v1${path}`;
+  const url = `${apiUrl.replace(/\/$/, "")}${apiPath}`;
   const maxRetries = options.retries ?? MAX_RETRIES;
   const baseDelay = options.retryDelay ?? BASE_DELAY;
   const timeoutMs =
-    typeof options.timeoutMs === 'number' && options.timeoutMs > 0
-      ? options.timeoutMs
-      : 180_000;
+    typeof options.timeoutMs === "number" && options.timeoutMs > 0 ? options.timeoutMs : 180_000;
 
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'User-Agent': userAgent,
+    "Content-Type": "application/json",
+    "User-Agent": userAgent,
   };
-  if (apiKey) headers['X-API-Key'] = apiKey;
-  if (jwt) headers['Authorization'] = `Bearer ${jwt}`;
+  if (apiKey) headers["X-API-Key"] = apiKey;
+  if (jwt) headers["Authorization"] = `Bearer ${jwt}`;
   const workspaceId =
     authOverride?.workspaceId ||
     options.workspaceId ||
     inferWorkspaceIdFromBody(options.body) ||
     inferWorkspaceIdFromPath(apiPath) ||
     config.defaultWorkspaceId;
-  if (workspaceId) headers['X-Workspace-Id'] = workspaceId;
+  if (workspaceId) headers["X-Workspace-Id"] = workspaceId;
 
   const fetchOptions: RequestInit = {
-    method: options.method || (options.body ? 'POST' : 'GET'),
+    method: options.method || (options.body ? "POST" : "GET"),
     headers,
   };
 
@@ -115,7 +126,7 @@ export async function request<T>(
 
     // Combine user signal with timeout
     if (options.signal) {
-      options.signal.addEventListener('abort', () => controller.abort());
+      options.signal.addEventListener("abort", () => controller.abort());
     }
     fetchOptions.signal = controller.signal;
 
@@ -124,18 +135,18 @@ export async function request<T>(
       response = await fetch(url, fetchOptions);
     } catch (error: any) {
       clearTimeout(timeout);
-      
+
       // Handle abort
-      if (error.name === 'AbortError') {
+      if (error.name === "AbortError") {
         if (options.signal?.aborted) {
-          throw new HttpError(0, 'Request cancelled by user');
+          throw new HttpError(0, "Request cancelled by user");
         }
         const seconds = Math.ceil(timeoutMs / 1000);
         throw new HttpError(0, `Request timeout after ${seconds} seconds`);
       }
-      
-      lastError = new HttpError(0, error?.message || 'Network error');
-      
+
+      lastError = new HttpError(0, error?.message || "Network error");
+
       // Retry on network errors
       if (attempt < maxRetries) {
         const delay = baseDelay * Math.pow(2, attempt);
@@ -148,8 +159,8 @@ export async function request<T>(
     clearTimeout(timeout);
 
     let payload: any = null;
-    const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
       payload = await response.json().catch(() => null);
     } else {
       payload = await response.text().catch(() => null);
@@ -169,45 +180,46 @@ export async function request<T>(
 
       const apiCode = extractErrorCode(enrichedPayload);
       if (apiCode) lastError.code = apiCode;
-      
+
       // Retry on retryable status codes
       if (RETRYABLE_STATUSES.has(response.status) && attempt < maxRetries) {
-        const retryAfter = response.headers.get('retry-after');
-        const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : baseDelay * Math.pow(2, attempt);
+        const retryAfter = response.headers.get("retry-after");
+        const delay = retryAfter
+          ? parseInt(retryAfter, 10) * 1000
+          : baseDelay * Math.pow(2, attempt);
         await sleep(delay);
         continue;
       }
-      
+
       throw lastError;
     }
 
     return payload as T;
   }
 
-  throw lastError || new HttpError(0, 'Request failed after retries');
+  throw lastError || new HttpError(0, "Request failed after retries");
 }
 
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function isUuid(value: unknown): value is string {
-  return typeof value === 'string' && UUID_RE.test(value);
+  return typeof value === "string" && UUID_RE.test(value);
 }
 
 function inferWorkspaceIdFromBody(body: unknown): string | undefined {
-  if (!body || typeof body !== 'object') return undefined;
+  if (!body || typeof body !== "object") return undefined;
   const maybe = (body as any).workspace_id;
   return isUuid(maybe) ? maybe : undefined;
 }
 
 function inferWorkspaceIdFromPath(apiPath: string): string | undefined {
   // Query param (e.g., /projects?workspace_id=...)
-  const qIndex = apiPath.indexOf('?');
+  const qIndex = apiPath.indexOf("?");
   if (qIndex >= 0) {
     try {
       const query = apiPath.slice(qIndex + 1);
       const params = new URLSearchParams(query);
-      const ws = params.get('workspace_id');
+      const ws = params.get("workspace_id");
       if (isUuid(ws)) return ws;
     } catch {
       // ignore
@@ -235,18 +247,18 @@ type RateLimitHeaders = {
 };
 
 function parseRateLimitHeaders(headers: Headers): RateLimitHeaders | null {
-  const limit = headers.get('X-RateLimit-Limit');
+  const limit = headers.get("X-RateLimit-Limit");
   if (!limit) return null;
 
-  const retryAfter = headers.get('Retry-After');
+  const retryAfter = headers.get("Retry-After");
 
   return {
     limit: parseInt(limit, 10),
-    remaining: parseInt(headers.get('X-RateLimit-Remaining') || '0', 10),
-    reset: parseInt(headers.get('X-RateLimit-Reset') || '0', 10),
-    scope: headers.get('X-RateLimit-Scope') || 'unknown',
-    plan: headers.get('X-RateLimit-Plan') || 'unknown',
-    group: headers.get('X-RateLimit-Group') || 'default',
+    remaining: parseInt(headers.get("X-RateLimit-Remaining") || "0", 10),
+    reset: parseInt(headers.get("X-RateLimit-Reset") || "0", 10),
+    scope: headers.get("X-RateLimit-Scope") || "unknown",
+    plan: headers.get("X-RateLimit-Plan") || "unknown",
+    group: headers.get("X-RateLimit-Group") || "default",
     retryAfter: retryAfter ? parseInt(retryAfter, 10) : undefined,
   };
 }
@@ -254,7 +266,7 @@ function parseRateLimitHeaders(headers: Headers): RateLimitHeaders | null {
 function attachRateLimit(payload: any, rateLimit: RateLimitHeaders | null): any {
   if (!rateLimit) return payload;
 
-  if (payload && typeof payload === 'object') {
+  if (payload && typeof payload === "object") {
     return { ...payload, rate_limit: rateLimit };
   }
 
@@ -266,13 +278,13 @@ function extractErrorMessage(payload: any, fallback: string): string {
 
   // ContextStream API error format: { error: { code, message, details }, ... }
   const nested = payload?.error;
-  if (nested && typeof nested === 'object' && typeof nested.message === 'string') {
+  if (nested && typeof nested === "object" && typeof nested.message === "string") {
     return nested.message;
   }
 
-  if (typeof payload.message === 'string') return payload.message;
-  if (typeof payload.error === 'string') return payload.error;
-  if (typeof payload.detail === 'string') return payload.detail;
+  if (typeof payload.message === "string") return payload.message;
+  if (typeof payload.error === "string") return payload.error;
+  if (typeof payload.detail === "string") return payload.detail;
 
   return fallback;
 }
@@ -280,16 +292,21 @@ function extractErrorMessage(payload: any, fallback: string): string {
 function extractErrorCode(payload: any): string | null {
   if (!payload) return null;
   const nested = payload?.error;
-  if (nested && typeof nested === 'object' && typeof nested.code === 'string' && nested.code.trim()) {
+  if (
+    nested &&
+    typeof nested === "object" &&
+    typeof nested.code === "string" &&
+    nested.code.trim()
+  ) {
     return nested.code.trim();
   }
-  if (typeof payload.code === 'string' && payload.code.trim()) return payload.code.trim();
+  if (typeof payload.code === "string" && payload.code.trim()) return payload.code.trim();
   return null;
 }
 
-function detectIntegrationProvider(path: string): 'github' | 'slack' | null {
-  if (/\/github(\/|$)/i.test(path)) return 'github';
-  if (/\/slack(\/|$)/i.test(path)) return 'slack';
+function detectIntegrationProvider(path: string): "github" | "slack" | null {
+  if (/\/github(\/|$)/i.test(path)) return "github";
+  if (/\/slack(\/|$)/i.test(path)) return "slack";
   return null;
 }
 
@@ -305,6 +322,6 @@ function rewriteNotFoundMessage(input: {
   if (!provider) return input.message;
   if (!/\/workspaces\//i.test(input.path)) return input.message;
 
-  const label = provider === 'github' ? 'GitHub' : 'Slack';
+  const label = provider === "github" ? "GitHub" : "Slack";
   return `${label} integration is not connected for this workspace. Connect ${label} in workspace integrations and retry. If you intended a different workspace, pass workspace_id.`;
 }

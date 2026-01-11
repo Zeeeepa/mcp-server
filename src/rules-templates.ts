@@ -1,4 +1,4 @@
-import { VERSION } from './version.js';
+import { VERSION } from "./version.js";
 
 /**
  * Editor-specific rule templates for ContextStream integration.
@@ -11,8 +11,8 @@ export interface RuleTemplate {
   build: (rules: string) => string;
 }
 
-const DEFAULT_CLAUDE_MCP_SERVER_NAME = 'contextstream';
-export const RULES_VERSION = VERSION === 'unknown' ? '0.0.0' : VERSION;
+const DEFAULT_CLAUDE_MCP_SERVER_NAME = "contextstream";
+export const RULES_VERSION = VERSION === "unknown" ? "0.0.0" : VERSION;
 
 /**
  * Complete list of all ContextStream MCP tools (v0.4.x consolidated architecture).
@@ -22,27 +22,27 @@ export const RULES_VERSION = VERSION === 'unknown' ? '0.0.0' : VERSION;
  */
 const CONTEXTSTREAM_TOOL_NAMES = [
   // Standalone tools (always present)
-  'session_init',
-  'context_smart',
-  'context_feedback',
-  'generate_rules',
+  "session_init",
+  "context_smart",
+  "context_feedback",
+  "generate_rules",
 
   // Consolidated domain tools (v0.4.x default)
-  'search',       // Modes: semantic, hybrid, keyword, pattern
-  'session',      // Actions: capture, capture_lesson, get_lessons, recall, remember, user_context, summary, compress, delta, smart_search, decision_trace
-  'memory',       // Actions: create_event, get_event, update_event, delete_event, list_events, distill_event, create_node, get_node, update_node, delete_node, list_nodes, supersede_node, search, decisions, timeline, summary
-  'graph',        // Actions: dependencies, impact, call_path, related, path, decisions, ingest, circular_dependencies, unused_code, contradictions
-  'project',      // Actions: list, get, create, update, index, overview, statistics, files, index_status, ingest_local
-  'workspace',    // Actions: list, get, associate, bootstrap
-  'reminder',     // Actions: list, active, create, snooze, complete, dismiss
-  'integration',  // Provider: slack, github, all; Actions: status, search, stats, activity, contributors, knowledge, summary, channels, discussions, sync_users, repos, issues
-  'help',         // Actions: tools, auth, version, editor_rules, enable_bundle
+  "search", // Modes: semantic, hybrid, keyword, pattern
+  "session", // Actions: capture, capture_lesson, get_lessons, recall, remember, user_context, summary, compress, delta, smart_search, decision_trace
+  "memory", // Actions: create_event, get_event, update_event, delete_event, list_events, distill_event, create_node, get_node, update_node, delete_node, list_nodes, supersede_node, search, decisions, timeline, summary
+  "graph", // Actions: dependencies, impact, call_path, related, path, decisions, ingest, circular_dependencies, unused_code, contradictions
+  "project", // Actions: list, get, create, update, index, overview, statistics, files, index_status, ingest_local
+  "workspace", // Actions: list, get, associate, bootstrap
+  "reminder", // Actions: list, active, create, snooze, complete, dismiss
+  "integration", // Provider: slack, github, all; Actions: status, search, stats, activity, contributors, knowledge, summary, channels, discussions, sync_users, repos, issues
+  "help", // Actions: tools, auth, version, editor_rules, enable_bundle
 ] as const;
 
 function applyMcpToolPrefix(markdown: string, toolPrefix: string): string {
-  const toolPattern = CONTEXTSTREAM_TOOL_NAMES.join('|');
+  const toolPattern = CONTEXTSTREAM_TOOL_NAMES.join("|");
   // Only prefix tool calls like `tool(...)` and avoid double-prefixing `mcp__<server>__tool(...)`.
-  const toolRegex = new RegExp(`(?<!__)\\b(${toolPattern})\\b(?=\\s*\\()`, 'g');
+  const toolRegex = new RegExp(`(?<!__)\\b(${toolPattern})\\b(?=\\s*\\()`, "g");
   return markdown.replace(toolRegex, `${toolPrefix}$1`);
 }
 
@@ -210,6 +210,11 @@ search(mode="hybrid", query="function implementation") → done (results include
 - User asks "how many X" or "count of X" → \`search(..., output_format="count")\`
 - Checking if something exists → count > 0 is sufficient
 - Large exhaustive searches → get count first, then fetch if needed
+
+**Auto-suggested formats:** Search responses include \`query_interpretation.suggested_output_format\` when the API detects an optimal format:
+- Symbol queries (e.g., "authOptions") → suggests \`minimal\` (path + line + snippet)
+- Count queries (e.g., "how many") → suggests \`count\`
+**USE the suggested format** on subsequent searches for best token efficiency.
 
 **Search defaults:** \`search\` returns the top 3 results with compact snippets. Use \`limit\` + \`offset\` for pagination, and \`content_max_chars\` to expand snippets when needed.
 
@@ -386,6 +391,11 @@ Use \`output_format\` to reduce response size:
 - Checking if something exists → count > 0 is sufficient
 - Large exhaustive searches → get count first, then fetch if needed
 
+**Auto-suggested formats:** Check \`query_interpretation.suggested_output_format\` in responses:
+- Symbol queries → suggests \`minimal\` (path + line + snippet)
+- Count queries → suggests \`count\`
+**USE the suggestion** for best efficiency.
+
 **Example:** User asks "how many TODO comments?" →
 \`search(mode="exhaustive", query="TODO", output_format="count")\` returns \`{total: 47}\` (not 47 full results)
 
@@ -409,70 +419,73 @@ Full docs: https://contextstream.io/docs/mcp/tools
 
 export const TEMPLATES: Record<string, RuleTemplate> = {
   codex: {
-    filename: 'AGENTS.md',
-    description: 'Codex CLI agent instructions',
+    filename: "AGENTS.md",
+    description: "Codex CLI agent instructions",
     build: (rules) => `# Codex CLI Instructions
 ${rules}
 `,
   },
 
   windsurf: {
-    filename: '.windsurfrules',
-    description: 'Windsurf AI rules',
+    filename: ".windsurfrules",
+    description: "Windsurf AI rules",
     build: (rules) => `# Windsurf Rules
 ${rules}
 `,
   },
 
   cursor: {
-    filename: '.cursorrules',
-    description: 'Cursor AI rules', 
+    filename: ".cursorrules",
+    description: "Cursor AI rules",
     build: (rules) => `# Cursor Rules
 ${rules}
 `,
   },
 
   cline: {
-    filename: '.clinerules',
-    description: 'Cline AI rules',
+    filename: ".clinerules",
+    description: "Cline AI rules",
     build: (rules) => `# Cline Rules
 ${rules}
 `,
   },
 
   kilo: {
-    filename: '.kilocode/rules/contextstream.md',
-    description: 'Kilo Code AI rules',
+    filename: ".kilocode/rules/contextstream.md",
+    description: "Kilo Code AI rules",
     build: (rules) => `# Kilo Code Rules
 ${rules}
 `,
   },
 
   roo: {
-    filename: '.roo/rules/contextstream.md',
-    description: 'Roo Code AI rules',
+    filename: ".roo/rules/contextstream.md",
+    description: "Roo Code AI rules",
     build: (rules) => `# Roo Code Rules
 ${rules}
 `,
   },
 
   claude: {
-    filename: 'CLAUDE.md',
-    description: 'Claude Code instructions',
+    filename: "CLAUDE.md",
+    description: "Claude Code instructions",
     build: (rules) => `# Claude Code Instructions
 ${rules}
 `,
   },
 
   aider: {
-    filename: '.aider.conf.yml',
-    description: 'Aider configuration with system prompt',
+    filename: ".aider.conf.yml",
+    description: "Aider configuration with system prompt",
     build: (rules) => `# Aider Configuration
 # Note: Aider uses different config format - this adds to the system prompt
 
 # Add ContextStream guidance to conventions
 conventions: |
-${rules.split('\n').map(line => '  ' + line).join('\n')}
+${rules
+  .split("\n")
+  .map((line) => "  " + line)
+  .join("\n")}
 `,
   },
 };
@@ -501,23 +514,23 @@ export function generateRuleContent(
     workspaceId?: string;
     projectName?: string;
     additionalRules?: string;
-    mode?: 'minimal' | 'full';
+    mode?: "minimal" | "full";
   }
 ): { filename: string; content: string } | null {
   const template = getTemplate(editor);
   if (!template) return null;
 
-  const mode = options?.mode || 'minimal';
-  const rules = mode === 'full' ? CONTEXTSTREAM_RULES_FULL : CONTEXTSTREAM_RULES_MINIMAL;
+  const mode = options?.mode || "minimal";
+  const rules = mode === "full" ? CONTEXTSTREAM_RULES_FULL : CONTEXTSTREAM_RULES_MINIMAL;
 
   let content = template.build(rules);
 
   // Add workspace header if provided
   if (options?.workspaceName || options?.projectName) {
     const header = `
-# Workspace: ${options.workspaceName || 'Unknown'}
-${options.projectName ? `# Project: ${options.projectName}` : ''}
-${options.workspaceId ? `# Workspace ID: ${options.workspaceId}` : ''}
+# Workspace: ${options.workspaceName || "Unknown"}
+${options.projectName ? `# Project: ${options.projectName}` : ""}
+${options.workspaceId ? `# Workspace ID: ${options.workspaceId}` : ""}
 
 `;
     content = header + content;
@@ -525,18 +538,18 @@ ${options.workspaceId ? `# Workspace ID: ${options.workspaceId}` : ''}
 
   // Append additional rules if provided
   if (options?.additionalRules) {
-    content += '\n\n## Project-Specific Rules\n\n' + options.additionalRules;
+    content += "\n\n## Project-Specific Rules\n\n" + options.additionalRules;
   }
 
   // Claude Code requires `mcp__<server>__<tool>` naming convention for MCP tools.
   // Other MCP clients typically use raw tool names.
-  if (editor.toLowerCase() === 'claude') {
+  if (editor.toLowerCase() === "claude") {
     content = applyMcpToolPrefix(content, `mcp__${DEFAULT_CLAUDE_MCP_SERVER_NAME}__`);
   }
 
   return {
     filename: template.filename,
-    content: content.trim() + '\n',
+    content: content.trim() + "\n",
   };
 }
 
@@ -548,10 +561,10 @@ export function generateAllRuleFiles(options?: {
   workspaceId?: string;
   projectName?: string;
   additionalRules?: string;
-  mode?: 'minimal' | 'full';
+  mode?: "minimal" | "full";
 }): Array<{ editor: string; filename: string; content: string }> {
   return getAvailableEditors()
-    .map(editor => {
+    .map((editor) => {
       const result = generateRuleContent(editor, options);
       if (!result) return null;
       return { editor, ...result };

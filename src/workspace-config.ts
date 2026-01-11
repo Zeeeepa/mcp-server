@@ -1,5 +1,5 @@
-import * as fs from 'fs';
-import * as path from 'path';
+import * as fs from "fs";
+import * as path from "path";
 
 export interface WorkspaceConfig {
   workspace_id: string;
@@ -15,9 +15,9 @@ export interface ParentMapping {
   workspace_name: string;
 }
 
-const CONFIG_DIR = '.contextstream';
-const CONFIG_FILE = 'config.json';
-const GLOBAL_MAPPINGS_FILE = '.contextstream-mappings.json';
+const CONFIG_DIR = ".contextstream";
+const CONFIG_FILE = "config.json";
+const GLOBAL_MAPPINGS_FILE = ".contextstream-mappings.json";
 
 /**
  * Read workspace config from a repo's .contextstream/config.json
@@ -26,7 +26,7 @@ export function readLocalConfig(repoPath: string): WorkspaceConfig | null {
   const configPath = path.join(repoPath, CONFIG_DIR, CONFIG_FILE);
   try {
     if (fs.existsSync(configPath)) {
-      const content = fs.readFileSync(configPath, 'utf-8');
+      const content = fs.readFileSync(configPath, "utf-8");
       return JSON.parse(content) as WorkspaceConfig;
     }
   } catch (e) {
@@ -57,11 +57,11 @@ export function writeLocalConfig(repoPath: string, config: WorkspaceConfig): boo
  * Read global parent folder mappings from user's home directory
  */
 export function readGlobalMappings(): ParentMapping[] {
-  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+  const homeDir = process.env.HOME || process.env.USERPROFILE || "";
   const mappingsPath = path.join(homeDir, GLOBAL_MAPPINGS_FILE);
   try {
     if (fs.existsSync(mappingsPath)) {
-      const content = fs.readFileSync(mappingsPath, 'utf-8');
+      const content = fs.readFileSync(mappingsPath, "utf-8");
       return JSON.parse(content) as ParentMapping[];
     }
   } catch (e) {
@@ -74,7 +74,7 @@ export function readGlobalMappings(): ParentMapping[] {
  * Write global parent folder mappings to user's home directory
  */
 export function writeGlobalMappings(mappings: ParentMapping[]): boolean {
-  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+  const homeDir = process.env.HOME || process.env.USERPROFILE || "";
   const mappingsPath = path.join(homeDir, GLOBAL_MAPPINGS_FILE);
   try {
     fs.writeFileSync(mappingsPath, JSON.stringify(mappings, null, 2));
@@ -92,7 +92,7 @@ export function addGlobalMapping(mapping: ParentMapping): boolean {
   const normalizedPattern = path.normalize(mapping.pattern);
   const mappings = readGlobalMappings();
   // Remove any existing mapping with same pattern
-  const filtered = mappings.filter(m => path.normalize(m.pattern) !== normalizedPattern);
+  const filtered = mappings.filter((m) => path.normalize(m.pattern) !== normalizedPattern);
   filtered.push({ ...mapping, pattern: normalizedPattern });
   return writeGlobalMappings(filtered);
 }
@@ -103,7 +103,7 @@ export function addGlobalMapping(mapping: ParentMapping): boolean {
 export function findMatchingMapping(repoPath: string): ParentMapping | null {
   const mappings = readGlobalMappings();
   const normalizedRepo = path.normalize(repoPath);
-  
+
   for (const mapping of mappings) {
     const normalizedPattern = path.normalize(mapping.pattern);
 
@@ -128,12 +128,12 @@ export function findMatchingMapping(repoPath: string): ParentMapping | null {
  */
 export function resolveWorkspace(repoPath: string): {
   config: WorkspaceConfig | null;
-  source: 'local_config' | 'parent_mapping' | 'ambiguous';
+  source: "local_config" | "parent_mapping" | "ambiguous";
 } {
   // Step 1: Check local config
   const localConfig = readLocalConfig(repoPath);
   if (localConfig) {
-    return { config: localConfig, source: 'local_config' };
+    return { config: localConfig, source: "local_config" };
   }
 
   // Step 2: Check parent folder mappings
@@ -144,10 +144,10 @@ export function resolveWorkspace(repoPath: string): {
         workspace_id: mapping.workspace_id,
         workspace_name: mapping.workspace_name,
       },
-      source: 'parent_mapping',
+      source: "parent_mapping",
     };
   }
 
   // Step 3: Ambiguous - needs user selection
-  return { config: null, source: 'ambiguous' };
+  return { config: null, source: "ambiguous" };
 }

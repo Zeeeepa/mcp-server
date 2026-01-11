@@ -1,21 +1,21 @@
-import { createRequire } from 'module';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { homedir } from 'os';
-import { join } from 'path';
+import { createRequire } from "module";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
 
-const UPGRADE_COMMAND = 'npm update -g @contextstream/mcp-server';
-const NPM_LATEST_URL = 'https://registry.npmjs.org/@contextstream/mcp-server/latest';
+const UPGRADE_COMMAND = "npm update -g @contextstream/mcp-server";
+const NPM_LATEST_URL = "https://registry.npmjs.org/@contextstream/mcp-server/latest";
 
 export function getVersion(): string {
   try {
     const require = createRequire(import.meta.url);
-    const pkg = require('../package.json') as { version?: string } | undefined;
+    const pkg = require("../package.json") as { version?: string } | undefined;
     const version = pkg?.version;
-    if (typeof version === 'string' && version.trim()) return version.trim();
+    if (typeof version === "string" && version.trim()) return version.trim();
   } catch {
     // ignore
   }
-  return 'unknown';
+  return "unknown";
 }
 
 export const VERSION = getVersion();
@@ -24,9 +24,9 @@ export const VERSION = getVersion();
  * Compare two semver version strings.
  * Returns: -1 if v1 < v2, 0 if v1 === v2, 1 if v1 > v2
  */
-function compareVersions(v1: string, v2: string): number {
-  const parts1 = v1.split('.').map(Number);
-  const parts2 = v2.split('.').map(Number);
+export function compareVersions(v1: string, v2: string): number {
+  const parts1 = v1.split(".").map(Number);
+  const parts2 = v2.split(".").map(Number);
 
   for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
     const p1 = parts1[i] ?? 0;
@@ -53,14 +53,14 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 let latestVersionPromise: Promise<string | null> | null = null;
 
 function getCacheFilePath(): string {
-  return join(homedir(), '.contextstream', 'version-cache.json');
+  return join(homedir(), ".contextstream", "version-cache.json");
 }
 
 function readCache(): VersionCache | null {
   try {
     const cacheFile = getCacheFilePath();
     if (!existsSync(cacheFile)) return null;
-    const data = JSON.parse(readFileSync(cacheFile, 'utf-8')) as VersionCache;
+    const data = JSON.parse(readFileSync(cacheFile, "utf-8")) as VersionCache;
     // Check if cache is expired
     if (Date.now() - data.checkedAt > CACHE_TTL_MS) return null;
     return data;
@@ -71,15 +71,18 @@ function readCache(): VersionCache | null {
 
 function writeCache(latestVersion: string): void {
   try {
-    const configDir = join(homedir(), '.contextstream');
+    const configDir = join(homedir(), ".contextstream");
     if (!existsSync(configDir)) {
       mkdirSync(configDir, { recursive: true });
     }
     const cacheFile = getCacheFilePath();
-    writeFileSync(cacheFile, JSON.stringify({
-      latestVersion,
-      checkedAt: Date.now(),
-    }));
+    writeFileSync(
+      cacheFile,
+      JSON.stringify({
+        latestVersion,
+        checkedAt: Date.now(),
+      })
+    );
   } catch {
     // ignore cache write errors
   }
@@ -92,14 +95,14 @@ async function fetchLatestVersion(): Promise<string | null> {
 
     const response = await fetch(NPM_LATEST_URL, {
       signal: controller.signal,
-      headers: { 'Accept': 'application/json' },
+      headers: { Accept: "application/json" },
     });
     clearTimeout(timeout);
 
     if (!response.ok) return null;
 
-    const data = await response.json() as { version?: string };
-    return typeof data.version === 'string' ? data.version : null;
+    const data = (await response.json()) as { version?: string };
+    return typeof data.version === "string" ? data.version : null;
   } catch {
     return null;
   }
@@ -135,20 +138,20 @@ export async function checkForUpdates(): Promise<void> {
 }
 
 function showUpdateWarning(currentVersion: string, latestVersion: string): void {
-  console.error('');
-  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.error("");
+  console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   console.error(`⚠️  Update available: v${currentVersion} → v${latestVersion}`);
-  console.error('');
+  console.error("");
   console.error(`   Run: ${UPGRADE_COMMAND}`);
-  console.error('');
-  console.error('   Then restart your AI tool to use the new version.');
-  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.error('');
+  console.error("");
+  console.error("   Then restart your AI tool to use the new version.");
+  console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.error("");
 }
 
 export async function getUpdateNotice(): Promise<VersionNotice | null> {
   const currentVersion = VERSION;
-  if (currentVersion === 'unknown') return null;
+  if (currentVersion === "unknown") return null;
 
   try {
     const latestVersion = await resolveLatestVersion();

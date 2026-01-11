@@ -7,7 +7,7 @@
 
 export interface ToolEntry {
   name: string;
-  hint: string;  // 1-2 word usage hint
+  hint: string; // 1-2 word usage hint
 }
 
 export interface ToolCategory {
@@ -21,113 +21,113 @@ export interface ToolCategory {
  */
 export const TOOL_CATALOG: ToolCategory[] = [
   {
-    name: 'Session',
+    name: "Session",
     tools: [
-      { name: 'init', hint: 'start-conv' },
-      { name: 'smart', hint: 'each-msg' },
-      { name: 'capture', hint: 'save' },
-      { name: 'recall', hint: 'find' },
-      { name: 'remember', hint: 'quick' },
-      { name: 'compress', hint: 'end' },
-      { name: 'summary', hint: 'brief' },
-      { name: 'delta', hint: 'changes' },
-      { name: 'get_lessons', hint: 'learn' },
-      { name: 'capture_lesson', hint: 'mistake' },
-      { name: 'get_user_context', hint: 'prefs' },
-      { name: 'smart_search', hint: 'deep-find' },
+      { name: "init", hint: "start-conv" },
+      { name: "smart", hint: "each-msg" },
+      { name: "capture", hint: "save" },
+      { name: "recall", hint: "find" },
+      { name: "remember", hint: "quick" },
+      { name: "compress", hint: "end" },
+      { name: "summary", hint: "brief" },
+      { name: "delta", hint: "changes" },
+      { name: "get_lessons", hint: "learn" },
+      { name: "capture_lesson", hint: "mistake" },
+      { name: "get_user_context", hint: "prefs" },
+      { name: "smart_search", hint: "deep-find" },
       // Plan actions
-      { name: 'capture_plan', hint: 'save-plan' },
-      { name: 'get_plan', hint: 'get-plan' },
-      { name: 'update_plan', hint: 'edit-plan' },
-      { name: 'list_plans', hint: 'list-plans' },
+      { name: "capture_plan", hint: "save-plan" },
+      { name: "get_plan", hint: "get-plan" },
+      { name: "update_plan", hint: "edit-plan" },
+      { name: "list_plans", hint: "list-plans" },
     ],
   },
   {
-    name: 'Search',
+    name: "Search",
     tools: [
-      { name: 'semantic', hint: 'meaning' },
-      { name: 'hybrid', hint: 'combo' },
-      { name: 'keyword', hint: 'exact' },
-      { name: 'pattern', hint: 'code' },
+      { name: "semantic", hint: "meaning" },
+      { name: "hybrid", hint: "combo" },
+      { name: "keyword", hint: "exact" },
+      { name: "pattern", hint: "code" },
     ],
   },
   {
-    name: 'Memory',
+    name: "Memory",
     tools: [
-      { name: 'create_event', hint: 'new' },
-      { name: 'list_events', hint: 'list' },
-      { name: 'get_event', hint: 'get' },
-      { name: 'update_event', hint: 'edit' },
-      { name: 'delete_event', hint: 'rm' },
-      { name: 'search', hint: 'find' },
-      { name: 'decisions', hint: 'choices' },
-      { name: 'timeline', hint: 'history' },
-      { name: 'distill_event', hint: 'extract' },
+      { name: "create_event", hint: "new" },
+      { name: "list_events", hint: "list" },
+      { name: "get_event", hint: "get" },
+      { name: "update_event", hint: "edit" },
+      { name: "delete_event", hint: "rm" },
+      { name: "search", hint: "find" },
+      { name: "decisions", hint: "choices" },
+      { name: "timeline", hint: "history" },
+      { name: "distill_event", hint: "extract" },
       // Task actions
-      { name: 'create_task', hint: 'new-task' },
-      { name: 'get_task', hint: 'get-task' },
-      { name: 'update_task', hint: 'edit-task' },
-      { name: 'delete_task', hint: 'rm-task' },
-      { name: 'list_tasks', hint: 'list-tasks' },
-      { name: 'reorder_tasks', hint: 'sort-tasks' },
+      { name: "create_task", hint: "new-task" },
+      { name: "get_task", hint: "get-task" },
+      { name: "update_task", hint: "edit-task" },
+      { name: "delete_task", hint: "rm-task" },
+      { name: "list_tasks", hint: "list-tasks" },
+      { name: "reorder_tasks", hint: "sort-tasks" },
     ],
   },
   {
-    name: 'Knowledge',
+    name: "Knowledge",
     tools: [
-      { name: 'create_node', hint: 'new' },
-      { name: 'list_nodes', hint: 'list' },
-      { name: 'get_node', hint: 'get' },
-      { name: 'update_node', hint: 'edit' },
-      { name: 'delete_node', hint: 'rm' },
-      { name: 'supersede_node', hint: 'replace' },
+      { name: "create_node", hint: "new" },
+      { name: "list_nodes", hint: "list" },
+      { name: "get_node", hint: "get" },
+      { name: "update_node", hint: "edit" },
+      { name: "delete_node", hint: "rm" },
+      { name: "supersede_node", hint: "replace" },
     ],
   },
   {
-    name: 'Graph',
+    name: "Graph",
     tools: [
-      { name: 'related', hint: 'links' },
-      { name: 'path', hint: 'trace' },
-      { name: 'decisions', hint: 'choices' },
-      { name: 'dependencies', hint: 'deps' },
-      { name: 'ingest', hint: 'build' },
-      { name: 'impact', hint: 'changes' },
-      { name: 'contradictions', hint: 'conflicts' },
+      { name: "related", hint: "links" },
+      { name: "path", hint: "trace" },
+      { name: "decisions", hint: "choices" },
+      { name: "dependencies", hint: "deps" },
+      { name: "ingest", hint: "build" },
+      { name: "impact", hint: "changes" },
+      { name: "contradictions", hint: "conflicts" },
     ],
   },
   {
-    name: 'Workspace',
+    name: "Workspace",
     tools: [
-      { name: 'list', hint: '' },
-      { name: 'get', hint: '' },
-      { name: 'create', hint: '' },
-      { name: 'associate', hint: 'link-folder' },
-      { name: 'bootstrap', hint: 'new-ws' },
+      { name: "list", hint: "" },
+      { name: "get", hint: "" },
+      { name: "create", hint: "" },
+      { name: "associate", hint: "link-folder" },
+      { name: "bootstrap", hint: "new-ws" },
     ],
   },
   {
-    name: 'Project',
+    name: "Project",
     tools: [
-      { name: 'list', hint: '' },
-      { name: 'get', hint: '' },
-      { name: 'create', hint: '' },
-      { name: 'index', hint: 'scan-code' },
-      { name: 'files', hint: 'list-files' },
-      { name: 'overview', hint: 'summary' },
+      { name: "list", hint: "" },
+      { name: "get", hint: "" },
+      { name: "create", hint: "" },
+      { name: "index", hint: "scan-code" },
+      { name: "files", hint: "list-files" },
+      { name: "overview", hint: "summary" },
     ],
   },
   {
-    name: 'AI',
+    name: "AI",
     tools: [
-      { name: 'context', hint: 'smart-ctx' },
-      { name: 'plan', hint: 'generate' },
-      { name: 'tasks', hint: 'breakdown' },
-      { name: 'embeddings', hint: 'vectors' },
+      { name: "context", hint: "smart-ctx" },
+      { name: "plan", hint: "generate" },
+      { name: "tasks", hint: "breakdown" },
+      { name: "embeddings", hint: "vectors" },
     ],
   },
 ];
 
-export type CatalogFormat = 'grouped' | 'minimal' | 'full';
+export type CatalogFormat = "grouped" | "minimal" | "full";
 
 /**
  * Generate ultra-compact tool catalog string.
@@ -139,27 +139,22 @@ export type CatalogFormat = 'grouped' | 'minimal' | 'full';
  * @param category - Optional filter to specific category
  * @returns Compact tool catalog string
  */
-export function generateToolCatalog(
-  format: CatalogFormat = 'grouped',
-  category?: string
-): string {
+export function generateToolCatalog(format: CatalogFormat = "grouped", category?: string): string {
   let categories = TOOL_CATALOG;
 
   if (category) {
-    const filtered = TOOL_CATALOG.filter(
-      c => c.name.toLowerCase() === category.toLowerCase()
-    );
+    const filtered = TOOL_CATALOG.filter((c) => c.name.toLowerCase() === category.toLowerCase());
     if (filtered.length > 0) {
       categories = filtered;
     }
   }
 
   switch (format) {
-    case 'minimal':
+    case "minimal":
       return generateMinimal(categories);
-    case 'full':
+    case "full":
       return generateFull(categories);
-    case 'grouped':
+    case "grouped":
     default:
       return generateGrouped(categories);
   }
@@ -171,13 +166,11 @@ export function generateToolCatalog(
  */
 function generateGrouped(categories: ToolCategory[]): string {
   return categories
-    .map(cat => {
-      const tools = cat.tools
-        .map(t => t.hint ? `${t.name}(${t.hint})` : t.name)
-        .join(' ');
+    .map((cat) => {
+      const tools = cat.tools.map((t) => (t.hint ? `${t.name}(${t.hint})` : t.name)).join(" ");
       return `${cat.name}: ${tools}`;
     })
-    .join('\n');
+    .join("\n");
 }
 
 /**
@@ -186,11 +179,11 @@ function generateGrouped(categories: ToolCategory[]): string {
  */
 function generateMinimal(categories: ToolCategory[]): string {
   return categories
-    .map(cat => {
-      const tools = cat.tools.map(t => t.name).join('|');
+    .map((cat) => {
+      const tools = cat.tools.map((t) => t.name).join("|");
       return `${cat.name}:${tools}`;
     })
-    .join('\n');
+    .join("\n");
 }
 
 /**
@@ -202,12 +195,12 @@ function generateFull(categories: ToolCategory[]): string {
   for (const cat of categories) {
     lines.push(`## ${cat.name}`);
     for (const tool of cat.tools) {
-      const prefix = cat.name.toLowerCase().replace(/\s+/g, '_');
+      const prefix = cat.name.toLowerCase().replace(/\s+/g, "_");
       const fullName = `${prefix}_${tool.name}`;
-      lines.push(`- ${fullName}: ${tool.hint || 'standard CRUD'}`);
+      lines.push(`- ${fullName}: ${tool.hint || "standard CRUD"}`);
     }
   }
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 /**

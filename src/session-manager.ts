@@ -1,14 +1,14 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { ContextStreamClient } from './client.js';
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ContextStreamClient } from "./client.js";
 
 /**
  * SessionManager tracks auto-context state per MCP connection.
- * 
+ *
  * This enables the "First-Tool Interceptor" pattern:
  * - On the FIRST tool call of any session, auto-initialize context
  * - Prepend context summary to the tool response
  * - Subsequent calls skip auto-init (context already loaded)
- * 
+ *
  * This works across ALL MCP clients (Windsurf, Cursor, Claude Desktop, VS Code, etc.)
  * because it only relies on the Tools primitive - the universal MCP feature.
  */
@@ -57,13 +57,16 @@ export class SessionManager {
     // Promote resolved workspace/project to client defaults so subsequent calls
     // (including those without explicit workspace_id in payload/path/query)
     // can still send X-Workspace-Id for workspace-pooled rate limits.
-    const workspaceId = typeof context.workspace_id === 'string' ? (context.workspace_id as string) : undefined;
-    const projectId = typeof context.project_id === 'string' ? (context.project_id as string) : undefined;
+    const workspaceId =
+      typeof context.workspace_id === "string" ? (context.workspace_id as string) : undefined;
+    const projectId =
+      typeof context.project_id === "string" ? (context.project_id as string) : undefined;
     if (workspaceId || projectId) {
       this.client.setDefaults({ workspace_id: workspaceId, project_id: projectId });
     }
 
-    const contextFolderPath = typeof context.folder_path === 'string' ? (context.folder_path as string) : undefined;
+    const contextFolderPath =
+      typeof context.folder_path === "string" ? (context.folder_path as string) : undefined;
     if (contextFolderPath) {
       this.folderPath = contextFolderPath;
     }
@@ -89,7 +92,12 @@ export class SessionManager {
    */
   warnIfContextSmartNotCalled(toolName: string): boolean {
     // Skip warning for these tools
-    const skipWarningTools = ['session_init', 'context_smart', 'session_recall', 'session_remember'];
+    const skipWarningTools = [
+      "session_init",
+      "context_smart",
+      "session_recall",
+      "session_remember",
+    ];
     if (skipWarningTools.includes(toolName)) {
       return false;
     }
@@ -101,18 +109,25 @@ export class SessionManager {
 
     this.warningShown = true;
     console.warn(`[ContextStream] Warning: ${toolName} called without context_smart.`);
-    console.warn('[ContextStream] For best results, call context_smart(user_message="...") before other tools.');
-    console.warn('[ContextStream] context_smart provides semantically relevant context for the user\'s query.');
+    console.warn(
+      '[ContextStream] For best results, call context_smart(user_message="...") before other tools.'
+    );
+    console.warn(
+      "[ContextStream] context_smart provides semantically relevant context for the user's query."
+    );
     return true;
   }
 
   /**
    * Auto-initialize the session if not already done.
    * Returns context summary to prepend to tool response.
-   * 
+   *
    * This is the core of the auto-context feature.
    */
-  async autoInitialize(): Promise<{ contextSummary: string; context: Record<string, unknown> } | null> {
+  async autoInitialize(): Promise<{
+    contextSummary: string;
+    context: Record<string, unknown>;
+  } | null> {
     // Already initialized - no need to do anything
     if (this.initialized) {
       return null;
@@ -125,60 +140,67 @@ export class SessionManager {
     }
 
     // Try multiple methods to detect workspace path
-    
+
     // Method 1: Check client capabilities and call listRoots if supported
     try {
       const capabilities = this.server.server.getClientCapabilities();
-      console.error('[ContextStream] Client capabilities:', JSON.stringify(capabilities));
-      
+      console.error("[ContextStream] Client capabilities:", JSON.stringify(capabilities));
+
       if (capabilities?.roots) {
         const rootsResponse = await this.server.server.listRoots();
-        console.error('[ContextStream] listRoots response:', JSON.stringify(rootsResponse));
+        console.error("[ContextStream] listRoots response:", JSON.stringify(rootsResponse));
         if (rootsResponse?.roots) {
-          this.ideRoots = rootsResponse.roots.map((r: { uri: string; name?: string }) => 
-            r.uri.replace('file://', '')
+          this.ideRoots = rootsResponse.roots.map((r: { uri: string; name?: string }) =>
+            r.uri.replace("file://", "")
           );
-          console.error('[ContextStream] IDE roots detected via listRoots:', this.ideRoots);
+          console.error("[ContextStream] IDE roots detected via listRoots:", this.ideRoots);
         }
       } else {
-        console.error('[ContextStream] Client does not support roots capability');
+        console.error("[ContextStream] Client does not support roots capability");
       }
     } catch (e) {
-      console.error('[ContextStream] listRoots failed:', (e as Error)?.message || e);
+      console.error("[ContextStream] listRoots failed:", (e as Error)?.message || e);
     }
-    
+
     // Method 2: Check environment variables that IDEs might set
     if (this.ideRoots.length === 0) {
-      const envWorkspace = process.env.WORKSPACE_FOLDER 
-        || process.env.VSCODE_WORKSPACE_FOLDER
-        || process.env.PROJECT_DIR
-        || process.env.PWD;
-      
+      const envWorkspace =
+        process.env.WORKSPACE_FOLDER ||
+        process.env.VSCODE_WORKSPACE_FOLDER ||
+        process.env.PROJECT_DIR ||
+        process.env.PWD;
+
       if (envWorkspace && envWorkspace !== process.env.HOME) {
-        console.error('[ContextStream] Using workspace from env:', envWorkspace);
+        console.error("[ContextStream] Using workspace from env:", envWorkspace);
         this.ideRoots = [envWorkspace];
       }
     }
-    
+
     // Method 3: Use current working directory if it looks like a project
     if (this.ideRoots.length === 0) {
       const cwd = process.cwd();
       // Check if cwd contains common project indicators
-      const fs = await import('fs');
-      const projectIndicators = ['.git', 'package.json', 'Cargo.toml', 'pyproject.toml', '.contextstream'];
-      const hasProjectIndicator = projectIndicators.some(f => {
+      const fs = await import("fs");
+      const projectIndicators = [
+        ".git",
+        "package.json",
+        "Cargo.toml",
+        "pyproject.toml",
+        ".contextstream",
+      ];
+      const hasProjectIndicator = projectIndicators.some((f) => {
         try {
           return fs.existsSync(`${cwd}/${f}`);
         } catch {
           return false;
         }
       });
-      
+
       if (hasProjectIndicator) {
-        console.error('[ContextStream] Using cwd as workspace:', cwd);
+        console.error("[ContextStream] Using cwd as workspace:", cwd);
         this.ideRoots = [cwd];
       } else {
-        console.error('[ContextStream] cwd does not look like a project:', cwd);
+        console.error("[ContextStream] cwd does not look like a project:", cwd);
       }
     }
 
@@ -193,7 +215,7 @@ export class SessionManager {
 
     // Perform initialization
     this.initializationPromise = this._doInitialize();
-    
+
     try {
       const result = await this.initializationPromise;
       return result as { contextSummary: string; context: Record<string, unknown> } | null;
@@ -202,39 +224,53 @@ export class SessionManager {
     }
   }
 
-  private async _doInitialize(): Promise<{ contextSummary: string; context: Record<string, unknown> } | null> {
+  private async _doInitialize(): Promise<{
+    contextSummary: string;
+    context: Record<string, unknown>;
+  } | null> {
     try {
-      console.error('[ContextStream] Auto-initializing session context...');
-      console.error('[ContextStream] Using IDE roots:', this.ideRoots.length > 0 ? this.ideRoots : '(none - will use fallback)');
-      
-      const context = await this.client.initSession(
+      console.error("[ContextStream] Auto-initializing session context...");
+      console.error(
+        "[ContextStream] Using IDE roots:",
+        this.ideRoots.length > 0 ? this.ideRoots : "(none - will use fallback)"
+      );
+
+      const context = (await this.client.initSession(
         {
           auto_index: true,
           include_recent_memory: true,
           include_decisions: true,
         },
         this.ideRoots
-      ) as Record<string, unknown>;
+      )) as Record<string, unknown>;
 
       this.initialized = true;
       this.context = context;
       this.client.setDefaults({
-        workspace_id: typeof context.workspace_id === 'string' ? (context.workspace_id as string) : undefined,
-        project_id: typeof context.project_id === 'string' ? (context.project_id as string) : undefined,
+        workspace_id:
+          typeof context.workspace_id === "string" ? (context.workspace_id as string) : undefined,
+        project_id:
+          typeof context.project_id === "string" ? (context.project_id as string) : undefined,
       });
 
-      console.error('[ContextStream] Workspace resolved:', context.workspace_name, '(source:', context.workspace_source, ')');
+      console.error(
+        "[ContextStream] Workspace resolved:",
+        context.workspace_name,
+        "(source:",
+        context.workspace_source,
+        ")"
+      );
 
       // Build a concise summary for the AI
       const summary = this.buildContextSummary(context);
-      
-      console.error('[ContextStream] Auto-initialization complete');
-      console.error(`[ContextStream] Workspace: ${context.workspace_name || 'unknown'}`);
-      console.error(`[ContextStream] Project: ${context.project_id ? 'loaded' : 'none'}`);
-      
+
+      console.error("[ContextStream] Auto-initialization complete");
+      console.error(`[ContextStream] Workspace: ${context.workspace_name || "unknown"}`);
+      console.error(`[ContextStream] Project: ${context.project_id ? "loaded" : "none"}`);
+
       return { contextSummary: summary, context };
     } catch (error) {
-      console.error('[ContextStream] Auto-initialization failed:', error);
+      console.error("[ContextStream] Auto-initialization failed:", error);
       // Don't block the original tool call on init failure
       this.initialized = true; // Prevent retry loops
       return null;
@@ -246,55 +282,57 @@ export class SessionManager {
    */
   private buildContextSummary(context: Record<string, unknown>): string {
     const parts: string[] = [];
-    
-    parts.push('═══════════════════════════════════════════');
-    parts.push('🧠 AUTO-CONTEXT LOADED (ContextStream)');
-    parts.push('═══════════════════════════════════════════');
+
+    parts.push("═══════════════════════════════════════════");
+    parts.push("🧠 AUTO-CONTEXT LOADED (ContextStream)");
+    parts.push("═══════════════════════════════════════════");
 
     // Status
-    if (context.status === 'requires_workspace_name') {
-      parts.push('');
-      parts.push('⚠️  NO WORKSPACE FOUND');
-      parts.push(`Folder: ${context.folder_name || 'unknown'}`);
-      parts.push('');
-      parts.push('Please ask the user for a name for the new workspace (recommended).');
-      parts.push('Then create a project for this folder.');
-      parts.push('');
-      parts.push('Recommended: call `workspace_bootstrap` with:');
-      if (typeof context.folder_path === 'string') {
+    if (context.status === "requires_workspace_name") {
+      parts.push("");
+      parts.push("⚠️  NO WORKSPACE FOUND");
+      parts.push(`Folder: ${context.folder_name || "unknown"}`);
+      parts.push("");
+      parts.push("Please ask the user for a name for the new workspace (recommended).");
+      parts.push("Then create a project for this folder.");
+      parts.push("");
+      parts.push("Recommended: call `workspace_bootstrap` with:");
+      if (typeof context.folder_path === "string") {
         parts.push(`  - folder_path: ${context.folder_path}`);
       } else {
-        parts.push('  - folder_path: (your repo folder path)');
+        parts.push("  - folder_path: (your repo folder path)");
       }
       parts.push('  - workspace_name: "<user-provided name>"');
-      parts.push('');
-      parts.push('To continue without a workspace for now:');
-      parts.push('  - call `session_init` again with `allow_no_workspace: true`');
-      parts.push('');
-      parts.push('═══════════════════════════════════════════');
-      return parts.join('\n');
+      parts.push("");
+      parts.push("To continue without a workspace for now:");
+      parts.push("  - call `session_init` again with `allow_no_workspace: true`");
+      parts.push("");
+      parts.push("═══════════════════════════════════════════");
+      return parts.join("\n");
     }
 
-    if (context.status === 'requires_workspace_selection') {
-      parts.push('');
-      parts.push('⚠️  NEW FOLDER DETECTED');
-      parts.push(`Folder: ${context.folder_name || 'unknown'}`);
-      parts.push('');
-      parts.push('Please ask the user which workspace this belongs to:');
-      const candidates = context.workspace_candidates as Array<{ id: string; name: string; description?: string }> | undefined;
+    if (context.status === "requires_workspace_selection") {
+      parts.push("");
+      parts.push("⚠️  NEW FOLDER DETECTED");
+      parts.push(`Folder: ${context.folder_name || "unknown"}`);
+      parts.push("");
+      parts.push("Please ask the user which workspace this belongs to:");
+      const candidates = context.workspace_candidates as
+        | Array<{ id: string; name: string; description?: string }>
+        | undefined;
       if (candidates) {
         candidates.forEach((w, i) => {
-          parts.push(`  ${i + 1}. ${w.name}${w.description ? ` - ${w.description}` : ''}`);
+          parts.push(`  ${i + 1}. ${w.name}${w.description ? ` - ${w.description}` : ""}`);
         });
       }
-      parts.push('  • Or create a new workspace');
-      parts.push('');
-      parts.push('Use workspace_associate tool after user selects.');
-      parts.push('');
-      parts.push('To continue without a workspace for now:');
-      parts.push('  - call `session_init` again with `allow_no_workspace: true`');
-      parts.push('═══════════════════════════════════════════');
-      return parts.join('\n');
+      parts.push("  • Or create a new workspace");
+      parts.push("");
+      parts.push("Use workspace_associate tool after user selects.");
+      parts.push("");
+      parts.push("To continue without a workspace for now:");
+      parts.push("  - call `session_init` again with `allow_no_workspace: true`");
+      parts.push("═══════════════════════════════════════════");
+      return parts.join("\n");
     }
 
     // Workspace info
@@ -305,69 +343,74 @@ export class SessionManager {
         parts.push(`   (resolved via: ${context.workspace_source})`);
       }
       if (context.workspace_created) {
-        parts.push('   (auto-created for this folder)');
+        parts.push("   (auto-created for this folder)");
       }
     }
 
     // Project info
     if (context.project_id) {
       const project = context.project as { name?: string } | undefined;
-      parts.push(`📂 Project: ${project?.name || 'loaded'}`);
+      parts.push(`📂 Project: ${project?.name || "loaded"}`);
       if (context.project_created) {
-        parts.push('   (auto-created, indexing in background)');
+        parts.push("   (auto-created, indexing in background)");
       }
-      if (context.indexing_status === 'started') {
-        parts.push('   ⏳ Code indexing in progress...');
+      if (context.indexing_status === "started") {
+        parts.push("   ⏳ Code indexing in progress...");
       }
     }
 
     // Recent decisions
-    const decisions = context.recent_decisions as { items?: Array<{ title?: string; content?: string }> } | undefined;
+    const decisions = context.recent_decisions as
+      | { items?: Array<{ title?: string; content?: string }> }
+      | undefined;
     if (decisions?.items && decisions.items.length > 0) {
-      parts.push('');
-      parts.push('📋 Recent Decisions:');
-      decisions.items.slice(0, 3).forEach(d => {
-        const title = d.title || d.content?.slice(0, 50) || 'Untitled';
+      parts.push("");
+      parts.push("📋 Recent Decisions:");
+      decisions.items.slice(0, 3).forEach((d) => {
+        const title = d.title || d.content?.slice(0, 50) || "Untitled";
         parts.push(`   • ${title}`);
       });
     }
 
     // Recent memory highlights
-    const memory = context.recent_memory as { items?: Array<{ title?: string; event_type?: string }> } | undefined;
+    const memory = context.recent_memory as
+      | { items?: Array<{ title?: string; event_type?: string }> }
+      | undefined;
     if (memory?.items && memory.items.length > 0) {
-      parts.push('');
-      parts.push('🧠 Recent Context:');
-      memory.items.slice(0, 3).forEach(m => {
-        const title = m.title || 'Note';
-        const type = m.event_type || '';
+      parts.push("");
+      parts.push("🧠 Recent Context:");
+      memory.items.slice(0, 3).forEach((m) => {
+        const title = m.title || "Note";
+        const type = m.event_type || "";
         parts.push(`   • [${type}] ${title}`);
       });
     }
 
     // High-priority lessons (warnings from past mistakes)
-    const lessonsWarning = typeof context.lessons_warning === 'string' ? (context.lessons_warning as string) : undefined;
+    const lessonsWarning =
+      typeof context.lessons_warning === "string" ? (context.lessons_warning as string) : undefined;
     const lessons = Array.isArray(context.lessons)
       ? (context.lessons as Array<{ title?: string; severity?: string }>)
       : [];
     if (lessonsWarning || lessons.length > 0) {
-      parts.push('');
-      parts.push('⚠️  Lessons (review before changes):');
+      parts.push("");
+      parts.push("⚠️  Lessons (review before changes):");
       if (lessonsWarning) {
         parts.push(`   ${lessonsWarning}`);
       }
-      lessons.slice(0, 3).forEach(l => {
-        const title = l.title || 'Lesson';
-        const severity = l.severity || 'unknown';
+      lessons.slice(0, 3).forEach((l) => {
+        const title = l.title || "Lesson";
+        const severity = l.severity || "unknown";
         parts.push(`   • [${severity}] ${title}`);
       });
       parts.push('   Use session_get_lessons(query="...") for details.');
     }
 
     // IDE roots with detection method
-    parts.push('');
+    parts.push("");
     if (context.ide_roots && (context.ide_roots as string[]).length > 0) {
       const roots = context.ide_roots as string[];
-      parts.push(`🖥️  IDE Roots: ${roots.join(', ')}`);
+      parts.push(`🖥️  IDE Roots: ${roots.join(", ")}`);
     } else {
       parts.push(`🖥️  IDE Roots: (none detected)`);
     }
@@ -376,13 +419,13 @@ export class SessionManager {
       parts.push(`   Detection: ${this.ideRoots[0]}`);
     }
 
-    parts.push('');
-    parts.push('═══════════════════════════════════════════');
-    parts.push('Use session_remember to save important context.');
-    parts.push('Use session_recall to retrieve past context.');
-    parts.push('═══════════════════════════════════════════');
+    parts.push("");
+    parts.push("═══════════════════════════════════════════");
+    parts.push("Use session_remember to save important context.");
+    parts.push("Use session_recall to retrieve past context.");
+    parts.push("═══════════════════════════════════════════");
 
-    return parts.join('\n');
+    return parts.join("\n");
   }
 }
 
@@ -393,7 +436,7 @@ type ToolHandler<T, R> = (input: T) => Promise<R>;
 
 /**
  * Creates a wrapped tool handler that auto-initializes context on first call.
- * 
+ *
  * This is the key function that enables auto-context across all MCP clients.
  */
 export function withAutoContext<T, R extends { content: Array<{ type: string; text: string }> }>(
@@ -403,14 +446,14 @@ export function withAutoContext<T, R extends { content: Array<{ type: string; te
 ): ToolHandler<T, R> {
   return async (input: T): Promise<R> => {
     // Skip auto-init for session_init itself (it handles its own initialization)
-    const skipAutoInit = toolName === 'session_init';
-    
-    let contextPrefix = '';
-    
+    const skipAutoInit = toolName === "session_init";
+
+    let contextPrefix = "";
+
     if (!skipAutoInit) {
       const autoInitResult = await sessionManager.autoInitialize();
       if (autoInitResult) {
-        contextPrefix = autoInitResult.contextSummary + '\n\n';
+        contextPrefix = autoInitResult.contextSummary + "\n\n";
       }
     }
 
@@ -420,10 +463,10 @@ export function withAutoContext<T, R extends { content: Array<{ type: string; te
     // Prepend context summary to the first text content (if we auto-initialized)
     if (contextPrefix && result.content && result.content.length > 0) {
       const firstContent = result.content[0];
-      if (firstContent.type === 'text') {
+      if (firstContent.type === "text") {
         result.content[0] = {
           ...firstContent,
-          text: contextPrefix + '--- Original Tool Response ---\n\n' + firstContent.text,
+          text: contextPrefix + "--- Original Tool Response ---\n\n" + firstContent.text,
         };
       }
     }

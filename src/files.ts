@@ -2,8 +2,8 @@
  * File reading utilities for code indexing
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
+import * as fs from "fs";
+import * as path from "path";
 
 export interface FileToIngest {
   path: string;
@@ -14,81 +14,110 @@ export interface FileToIngest {
 // File extensions to include for indexing
 const CODE_EXTENSIONS = new Set([
   // Rust
-  'rs',
+  "rs",
   // TypeScript/JavaScript
-  'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs',
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
   // Python
-  'py', 'pyi',
+  "py",
+  "pyi",
   // Go
-  'go',
+  "go",
   // Java/Kotlin
-  'java', 'kt', 'kts',
+  "java",
+  "kt",
+  "kts",
   // C/C++
-  'c', 'h', 'cpp', 'hpp', 'cc', 'cxx',
+  "c",
+  "h",
+  "cpp",
+  "hpp",
+  "cc",
+  "cxx",
   // C#
-  'cs',
+  "cs",
   // Ruby
-  'rb',
+  "rb",
   // PHP
-  'php',
+  "php",
   // Swift
-  'swift',
+  "swift",
   // Scala
-  'scala',
+  "scala",
   // Shell
-  'sh', 'bash', 'zsh',
+  "sh",
+  "bash",
+  "zsh",
   // Config/Data
-  'json', 'yaml', 'yml', 'toml', 'xml',
+  "json",
+  "yaml",
+  "yml",
+  "toml",
+  "xml",
   // SQL
-  'sql',
+  "sql",
   // Markdown/Docs
-  'md', 'markdown', 'rst', 'txt',
+  "md",
+  "markdown",
+  "rst",
+  "txt",
   // HTML/CSS
-  'html', 'htm', 'css', 'scss', 'sass', 'less',
+  "html",
+  "htm",
+  "css",
+  "scss",
+  "sass",
+  "less",
   // Other
-  'graphql', 'proto', 'dockerfile',
+  "graphql",
+  "proto",
+  "dockerfile",
 ]);
 
 // Directories to ignore
 const IGNORE_DIRS = new Set([
-  'node_modules',
-  '.git',
-  '.svn',
-  '.hg',
-  'target',
-  'dist',
-  'build',
-  'out',
-  '.next',
-  '.nuxt',
-  '__pycache__',
-  '.pytest_cache',
-  '.mypy_cache',
-  'venv',
-  '.venv',
-  'env',
-  '.env',
-  'vendor',
-  'coverage',
-  '.coverage',
-  '.idea',
-  '.vscode',
-  '.vs',
+  "node_modules",
+  ".git",
+  ".svn",
+  ".hg",
+  "target",
+  "dist",
+  "build",
+  "out",
+  ".next",
+  ".nuxt",
+  "__pycache__",
+  ".pytest_cache",
+  ".mypy_cache",
+  "venv",
+  ".venv",
+  "env",
+  ".env",
+  "vendor",
+  "coverage",
+  ".coverage",
+  ".idea",
+  ".vscode",
+  ".vs",
 ]);
 
 // Files to ignore
 const IGNORE_FILES = new Set([
-  '.DS_Store',
-  'Thumbs.db',
-  '.gitignore',
-  '.gitattributes',
-  'package-lock.json',
-  'yarn.lock',
-  'pnpm-lock.yaml',
-  'Cargo.lock',
-  'poetry.lock',
-  'Gemfile.lock',
-  'composer.lock',
+  ".DS_Store",
+  "Thumbs.db",
+  ".gitignore",
+  ".gitattributes",
+  "package-lock.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "Cargo.lock",
+  "poetry.lock",
+  "Gemfile.lock",
+  "composer.lock",
 ]);
 
 // Max file size to index (1MB)
@@ -111,7 +140,7 @@ export async function readFilesFromDirectory(
   const maxFileSize = options.maxFileSize ?? MAX_FILE_SIZE;
   const files: FileToIngest[] = [];
 
-  async function walkDir(dir: string, relativePath: string = ''): Promise<void> {
+  async function walkDir(dir: string, relativePath: string = ""): Promise<void> {
     if (files.length >= maxFiles) return;
 
     let entries: fs.Dirent[];
@@ -136,7 +165,7 @@ export async function readFilesFromDirectory(
         if (IGNORE_FILES.has(entry.name)) continue;
 
         // Check extension
-        const ext = entry.name.split('.').pop()?.toLowerCase() ?? '';
+        const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
         if (!CODE_EXTENSIONS.has(ext)) continue;
 
         // Check file size
@@ -145,7 +174,7 @@ export async function readFilesFromDirectory(
           if (stat.size > maxFileSize) continue;
 
           // Read file content
-          const content = await fs.promises.readFile(fullPath, 'utf-8');
+          const content = await fs.promises.readFile(fullPath, "utf-8");
           files.push({
             path: relPath,
             content,
@@ -176,7 +205,10 @@ export async function* readAllFilesInBatches(
   const maxFileSize = options.maxFileSize ?? MAX_FILE_SIZE;
   let batch: FileToIngest[] = [];
 
-  async function* walkDir(dir: string, relativePath: string = ''): AsyncGenerator<FileToIngest, void, unknown> {
+  async function* walkDir(
+    dir: string,
+    relativePath: string = ""
+  ): AsyncGenerator<FileToIngest, void, unknown> {
     let entries: fs.Dirent[];
     try {
       entries = await fs.promises.readdir(dir, { withFileTypes: true });
@@ -194,14 +226,14 @@ export async function* readAllFilesInBatches(
       } else if (entry.isFile()) {
         if (IGNORE_FILES.has(entry.name)) continue;
 
-        const ext = entry.name.split('.').pop()?.toLowerCase() ?? '';
+        const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
         if (!CODE_EXTENSIONS.has(ext)) continue;
 
         try {
           const stat = await fs.promises.stat(fullPath);
           if (stat.size > maxFileSize) continue;
 
-          const content = await fs.promises.readFile(fullPath, 'utf-8');
+          const content = await fs.promises.readFile(fullPath, "utf-8");
           yield { path: relPath, content };
         } catch {
           // Skip unreadable files
@@ -243,7 +275,10 @@ export async function* readChangedFilesInBatches(
   let filesScanned = 0;
   let filesChanged = 0;
 
-  async function* walkDir(dir: string, relativePath: string = ''): AsyncGenerator<FileToIngest, void, unknown> {
+  async function* walkDir(
+    dir: string,
+    relativePath: string = ""
+  ): AsyncGenerator<FileToIngest, void, unknown> {
     let entries: fs.Dirent[];
     try {
       entries = await fs.promises.readdir(dir, { withFileTypes: true });
@@ -261,7 +296,7 @@ export async function* readChangedFilesInBatches(
       } else if (entry.isFile()) {
         if (IGNORE_FILES.has(entry.name)) continue;
 
-        const ext = entry.name.split('.').pop()?.toLowerCase() ?? '';
+        const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
         if (!CODE_EXTENSIONS.has(ext)) continue;
 
         try {
@@ -273,7 +308,7 @@ export async function* readChangedFilesInBatches(
 
           if (stat.size > maxFileSize) continue;
 
-          const content = await fs.promises.readFile(fullPath, 'utf-8');
+          const content = await fs.promises.readFile(fullPath, "utf-8");
           filesChanged++;
           yield { path: relPath, content };
         } catch {
@@ -295,7 +330,9 @@ export async function* readChangedFilesInBatches(
     yield batch;
   }
 
-  console.error(`[ContextStream] Incremental scan: ${filesChanged} changed files out of ${filesScanned} scanned (since ${sinceTimestamp.toISOString()})`);
+  console.error(
+    `[ContextStream] Incremental scan: ${filesChanged} changed files out of ${filesScanned} scanned (since ${sinceTimestamp.toISOString()})`
+  );
 }
 
 /**
@@ -342,7 +379,7 @@ export async function countIndexableFiles(
       } else if (entry.isFile()) {
         if (IGNORE_FILES.has(entry.name)) continue;
 
-        const ext = entry.name.split('.').pop()?.toLowerCase() ?? '';
+        const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
         if (!CODE_EXTENSIONS.has(ext)) continue;
 
         try {
@@ -368,35 +405,35 @@ export async function countIndexableFiles(
  * Get language from file extension
  */
 export function detectLanguage(filePath: string): string {
-  const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+  const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
   const langMap: Record<string, string> = {
-    rs: 'rust',
-    ts: 'typescript',
-    tsx: 'typescript',
-    js: 'javascript',
-    jsx: 'javascript',
-    py: 'python',
-    go: 'go',
-    java: 'java',
-    kt: 'kotlin',
-    c: 'c',
-    h: 'c',
-    cpp: 'cpp',
-    hpp: 'cpp',
-    cs: 'csharp',
-    rb: 'ruby',
-    php: 'php',
-    swift: 'swift',
-    scala: 'scala',
-    sql: 'sql',
-    md: 'markdown',
-    json: 'json',
-    yaml: 'yaml',
-    yml: 'yaml',
-    toml: 'toml',
-    html: 'html',
-    css: 'css',
-    sh: 'shell',
+    rs: "rust",
+    ts: "typescript",
+    tsx: "typescript",
+    js: "javascript",
+    jsx: "javascript",
+    py: "python",
+    go: "go",
+    java: "java",
+    kt: "kotlin",
+    c: "c",
+    h: "c",
+    cpp: "cpp",
+    hpp: "cpp",
+    cs: "csharp",
+    rb: "ruby",
+    php: "php",
+    swift: "swift",
+    scala: "scala",
+    sql: "sql",
+    md: "markdown",
+    json: "json",
+    yaml: "yaml",
+    yml: "yaml",
+    toml: "toml",
+    html: "html",
+    css: "css",
+    sh: "shell",
   };
-  return langMap[ext] ?? 'unknown';
+  return langMap[ext] ?? "unknown";
 }

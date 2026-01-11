@@ -1,6 +1,6 @@
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
-import { homedir } from 'node:os';
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { homedir } from "node:os";
 
 export type SavedCredentialsV1 = {
   version: 1;
@@ -12,37 +12,39 @@ export type SavedCredentialsV1 = {
 };
 
 export function normalizeApiUrl(input: string): string {
-  return String(input ?? '')
-    .trim()
-    // Avoid accidental mismatches like https://api.example.com vs https://api.example.com/
-    .replace(/\/+$/, '');
+  return (
+    String(input ?? "")
+      .trim()
+      // Avoid accidental mismatches like https://api.example.com vs https://api.example.com/
+      .replace(/\/+$/, "")
+  );
 }
 
 export function credentialsFilePath(): string {
-  return path.join(homedir(), '.contextstream', 'credentials.json');
+  return path.join(homedir(), ".contextstream", "credentials.json");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export async function readSavedCredentials(): Promise<SavedCredentialsV1 | null> {
   const filePath = credentialsFilePath();
   try {
-    const raw = await fs.readFile(filePath, 'utf8');
+    const raw = await fs.readFile(filePath, "utf8");
     const parsed: unknown = JSON.parse(raw);
     if (!isRecord(parsed)) return null;
 
     const version = parsed.version;
     if (version !== 1) return null;
 
-    const apiUrl = typeof parsed.api_url === 'string' ? normalizeApiUrl(parsed.api_url) : '';
-    const apiKey = typeof parsed.api_key === 'string' ? parsed.api_key.trim() : '';
+    const apiUrl = typeof parsed.api_url === "string" ? normalizeApiUrl(parsed.api_url) : "";
+    const apiKey = typeof parsed.api_key === "string" ? parsed.api_key.trim() : "";
     if (!apiUrl || !apiKey) return null;
 
-    const email = typeof parsed.email === 'string' ? parsed.email.trim() : '';
-    const createdAt = typeof parsed.created_at === 'string' ? parsed.created_at : '';
-    const updatedAt = typeof parsed.updated_at === 'string' ? parsed.updated_at : '';
+    const email = typeof parsed.email === "string" ? parsed.email.trim() : "";
+    const createdAt = typeof parsed.created_at === "string" ? parsed.created_at : "";
+    const updatedAt = typeof parsed.updated_at === "string" ? parsed.updated_at : "";
     const now = new Date().toISOString();
 
     return {
@@ -78,8 +80,8 @@ export async function writeSavedCredentials(input: {
     updated_at: now,
   };
 
-  const body = JSON.stringify(value, null, 2) + '\n';
-  await fs.writeFile(filePath, body, { encoding: 'utf8', mode: 0o600 });
+  const body = JSON.stringify(value, null, 2) + "\n";
+  await fs.writeFile(filePath, body, { encoding: "utf8", mode: 0o600 });
   try {
     await fs.chmod(filePath, 0o600);
   } catch {
