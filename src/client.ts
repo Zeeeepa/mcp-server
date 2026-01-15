@@ -3621,7 +3621,7 @@ export class ContextStreamClient {
     const query = new URLSearchParams();
     if (params?.days) query.set("days", String(params.days));
     const suffix = query.toString() ? `?${query.toString()}` : "";
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/stats${suffix}`, {
+    return request(this.config, `/integrations/workspaces/${withDefaults.workspace_id}/slack/stats${suffix}`, {
       method: "GET",
     });
   }
@@ -3654,7 +3654,7 @@ export class ContextStreamClient {
     if (params?.page) query.set("page", String(params.page));
     if (params?.per_page) query.set("per_page", String(params.per_page));
     const suffix = query.toString() ? `?${query.toString()}` : "";
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/users${suffix}`, {
+    return request(this.config, `/integrations/workspaces/${withDefaults.workspace_id}/slack/users${suffix}`, {
       method: "GET",
     });
   }
@@ -3675,7 +3675,7 @@ export class ContextStreamClient {
     if (!withDefaults.workspace_id) {
       throw new Error("workspace_id is required for Slack channels");
     }
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/channels`, {
+    return request(this.config, `/integrations/workspaces/${withDefaults.workspace_id}/slack/channels`, {
       method: "GET",
     });
   }
@@ -3715,7 +3715,7 @@ export class ContextStreamClient {
     const suffix = query.toString() ? `?${query.toString()}` : "";
     return request(
       this.config,
-      `/workspaces/${withDefaults.workspace_id}/slack/activity${suffix}`,
+      `/integrations/workspaces/${withDefaults.workspace_id}/slack/activity${suffix}`,
       { method: "GET" }
     );
   }
@@ -3744,7 +3744,7 @@ export class ContextStreamClient {
     const suffix = query.toString() ? `?${query.toString()}` : "";
     return request(
       this.config,
-      `/workspaces/${withDefaults.workspace_id}/slack/discussions${suffix}`,
+      `/integrations/workspaces/${withDefaults.workspace_id}/slack/discussions${suffix}`,
       { method: "GET" }
     );
   }
@@ -3774,7 +3774,7 @@ export class ContextStreamClient {
     const suffix = query.toString() ? `?${query.toString()}` : "";
     return request(
       this.config,
-      `/workspaces/${withDefaults.workspace_id}/slack/contributors${suffix}`,
+      `/integrations/workspaces/${withDefaults.workspace_id}/slack/contributors${suffix}`,
       { method: "GET" }
     );
   }
@@ -3790,7 +3790,7 @@ export class ContextStreamClient {
     if (!withDefaults.workspace_id) {
       throw new Error("workspace_id is required for syncing Slack users");
     }
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/slack/sync-users`, {
+    return request(this.config, `/integrations/workspaces/${withDefaults.workspace_id}/slack/sync-users`, {
       method: "POST",
     });
   }
@@ -3823,7 +3823,7 @@ export class ContextStreamClient {
     if (params?.limit) query.set("limit", String(params.limit));
     return request(
       this.config,
-      `/workspaces/${withDefaults.workspace_id}/slack/search?${query.toString()}`,
+      `/integrations/workspaces/${withDefaults.workspace_id}/slack/search?${query.toString()}`,
       { method: "GET" }
     );
   }
@@ -3869,7 +3869,7 @@ export class ContextStreamClient {
     if (!withDefaults.workspace_id) {
       throw new Error("workspace_id is required for GitHub stats");
     }
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/github/stats`, {
+    return request(this.config, `/integrations/workspaces/${withDefaults.workspace_id}/github/stats`, {
       method: "GET",
     });
   }
@@ -3891,7 +3891,7 @@ export class ContextStreamClient {
     if (!withDefaults.workspace_id) {
       throw new Error("workspace_id is required for GitHub repos");
     }
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/github/repos`, {
+    return request(this.config, `/integrations/workspaces/${withDefaults.workspace_id}/github/repos`, {
       method: "GET",
     });
   }
@@ -3933,7 +3933,7 @@ export class ContextStreamClient {
     const suffix = query.toString() ? `?${query.toString()}` : "";
     return request(
       this.config,
-      `/workspaces/${withDefaults.workspace_id}/github/activity${suffix}`,
+      `/integrations/workspaces/${withDefaults.workspace_id}/github/activity${suffix}`,
       { method: "GET" }
     );
   }
@@ -3973,7 +3973,7 @@ export class ContextStreamClient {
     if (params?.state) query.set("state", params.state);
     if (params?.repo) query.set("repo", params.repo);
     const suffix = query.toString() ? `?${query.toString()}` : "";
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/github/issues${suffix}`, {
+    return request(this.config, `/integrations/workspaces/${withDefaults.workspace_id}/github/issues${suffix}`, {
       method: "GET",
     });
   }
@@ -3997,7 +3997,7 @@ export class ContextStreamClient {
     const suffix = query.toString() ? `?${query.toString()}` : "";
     return request(
       this.config,
-      `/workspaces/${withDefaults.workspace_id}/github/contributors${suffix}`,
+      `/integrations/workspaces/${withDefaults.workspace_id}/github/contributors${suffix}`,
       { method: "GET" }
     );
   }
@@ -4031,7 +4031,7 @@ export class ContextStreamClient {
     if (params?.limit) query.set("limit", String(params.limit));
     return request(
       this.config,
-      `/workspaces/${withDefaults.workspace_id}/github/search?${query.toString()}`,
+      `/integrations/workspaces/${withDefaults.workspace_id}/github/search?${query.toString()}`,
       { method: "GET" }
     );
   }
@@ -4065,7 +4065,7 @@ export class ContextStreamClient {
     const suffix = query.toString() ? `?${query.toString()}` : "";
     return request(
       this.config,
-      `/workspaces/${withDefaults.workspace_id}/github/knowledge${suffix}`,
+      `/integrations/workspaces/${withDefaults.workspace_id}/github/knowledge${suffix}`,
       { method: "GET" }
     );
   }
@@ -4099,7 +4099,7 @@ export class ContextStreamClient {
     const suffix = query.toString() ? `?${query.toString()}` : "";
     return request(
       this.config,
-      `/workspaces/${withDefaults.workspace_id}/slack/knowledge${suffix}`,
+      `/integrations/workspaces/${withDefaults.workspace_id}/slack/knowledge${suffix}`,
       { method: "GET" }
     );
   }
@@ -4121,9 +4121,10 @@ export class ContextStreamClient {
     if (!withDefaults.workspace_id) {
       throw new Error("workspace_id is required for integrations status");
     }
-    return request(this.config, `/workspaces/${withDefaults.workspace_id}/integrations/status`, {
+    const result = await request(this.config, `/integrations/workspaces/${withDefaults.workspace_id}/integrations/status`, {
       method: "GET",
     });
+    return unwrapApiResponse(result);
   }
 
   /**
@@ -4252,15 +4253,14 @@ export class ContextStreamClient {
     if (!withDefaults.workspace_id) {
       throw new Error("workspace_id is required for creating Notion pages");
     }
-    return request(this.config, `/integrations/notion/pages`, {
+    return request(this.config, `/integrations/notion/pages?workspace_id=${withDefaults.workspace_id}`, {
       method: "POST",
-      body: JSON.stringify({
-        workspace_id: withDefaults.workspace_id,
+      body: {
         title: params.title,
         content: params.content,
         parent_database_id: params.parent_database_id,
         parent_page_id: params.parent_page_id,
-      }),
+      },
     });
   }
 
@@ -4515,11 +4515,11 @@ export class ContextStreamClient {
       `/integrations/workspaces/${withDefaults.workspace_id}/notion/databases/${params.database_id}/query`,
       {
         method: "POST",
-        body: JSON.stringify({
+        body: {
           filter: params.filter,
           sorts: params.sorts,
           page_size: params.limit,
-        }),
+        },
       }
     );
   }
@@ -4548,11 +4548,11 @@ export class ContextStreamClient {
       `/integrations/workspaces/${withDefaults.workspace_id}/notion/pages/${params.page_id}`,
       {
         method: "PATCH",
-        body: JSON.stringify({
+        body: {
           title: params.title,
           content: params.content,
           properties: params.properties,
-        }),
+        },
       }
     );
   }
