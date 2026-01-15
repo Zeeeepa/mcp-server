@@ -1014,6 +1014,10 @@ const GITHUB_TOOLS = new Set<string>([
   "github_summary",
 ]);
 
+const NOTION_TOOLS = new Set<string>([
+  "notion_create_page",
+]);
+
 const CROSS_INTEGRATION_TOOLS = new Set<string>([
   "integrations_status",
   "integrations_search",
@@ -1025,6 +1029,7 @@ const CROSS_INTEGRATION_TOOLS = new Set<string>([
 const ALL_INTEGRATION_TOOLS = new Set<string>([
   ...SLACK_TOOLS,
   ...GITHUB_TOOLS,
+  ...NOTION_TOOLS,
   ...CROSS_INTEGRATION_TOOLS,
 ]);
 
@@ -1321,7 +1326,7 @@ const TOOL_BUNDLES: Record<string, Set<string>> = {
     "reminders_dismiss",
   ]),
 
-  // Integrations bundle - Slack/GitHub tools (auto-hidden when not connected)
+  // Integrations bundle - Slack/GitHub/Notion tools (auto-hidden when not connected)
   integrations: new Set([
     "slack_stats",
     "slack_channels",
@@ -1340,6 +1345,7 @@ const TOOL_BUNDLES: Record<string, Set<string>> = {
     "github_contributors",
     "github_knowledge",
     "github_summary",
+    "notion_create_page",
     "integrations_status",
     "integrations_search",
     "integrations_summary",
@@ -2081,6 +2087,8 @@ export function registerTools(
     "github_activity",
     "github_issues",
     "github_search",
+    // Notion integration tools
+    "notion_create_page",
   ]);
 
   const proTools = (() => {
@@ -6994,6 +7002,62 @@ Example prompts:
       };
     }
   );
+
+  // ============================================
+  // Notion Integration Tools
+  // ============================================
+
+  registerTool(
+    "notion_create_page",
+    {
+      title: "Create Notion page",
+      description: `Create a new page in a connected Notion workspace.
+Returns: the created page ID, URL, title, and timestamps.
+Use this to save notes, documentation, or any content to Notion.
+Supports Markdown content which is automatically converted to Notion blocks.
+
+Example prompts:
+- "Create a Notion page with today's meeting notes"
+- "Save this documentation to Notion"
+- "Create a new page in my Notion workspace"`,
+      inputSchema: z.object({
+        workspace_id: z.string().uuid().optional().describe("Workspace ID (uses session default if not provided)"),
+        title: z.string().describe("Page title"),
+        content: z.string().optional().describe("Page content in Markdown format"),
+        parent_database_id: z.string().optional().describe("Parent database ID to create page in"),
+        parent_page_id: z.string().optional().describe("Parent page ID to create page under"),
+      }),
+    },
+    async (input) => {
+      const workspaceId = resolveWorkspaceId(input.workspace_id);
+      if (!workspaceId) {
+        return errorResult(
+          "Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly."
+        );
+      }
+
+      const result = await client.createNotionPage({
+        workspace_id: workspaceId,
+        title: input.title,
+        content: input.content,
+        parent_database_id: input.parent_database_id,
+        parent_page_id: input.parent_page_id,
+      });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Page created successfully!\n\nTitle: ${result.title}\nURL: ${result.url}\nID: ${result.id}\nCreated: ${result.created_time}`,
+          },
+        ],
+        structuredContent: toStructured(result),
+      };
+    }
+  );
+
+  // ============================================
+  // Cross-Integration Tools
+  // ============================================
 
   registerTool(
     "integrations_search",

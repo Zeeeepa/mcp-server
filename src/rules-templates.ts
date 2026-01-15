@@ -47,13 +47,46 @@ function applyMcpToolPrefix(markdown: string, toolPrefix: string): string {
 }
 
 const CONTEXTSTREAM_RULES_FULL = `
-## 🚨 CRITICAL RULE - READ EVERY TURN 🚨
+## 🚨 CRITICAL RULE #1 - CONTEXTSTREAM SEARCH FIRST 🚨
 
-**BEFORE using Glob, Grep, Search, Read (for discovery), or Explore:**
+**BEFORE using Glob, Grep, Search, Read (for discovery), Explore, or ANY local file scanning:**
 \`\`\`
 STOP → Call search(mode="hybrid", query="...") FIRST
 \`\`\`
-Only use local tools if ContextStream returns 0 results. This applies to EVERY search throughout the ENTIRE conversation, not just the first message.
+
+**Claude Code users:** Your tool names are \`mcp__contextstream__search\`, \`mcp__contextstream__session_init\`, etc.
+
+❌ **NEVER DO THIS:**
+- \`Glob("**/*.ts")\` → Use \`search(mode="pattern", query="*.ts")\` instead
+- \`Grep("functionName")\` → Use \`search(mode="keyword", query="functionName")\` instead
+- \`Read(file)\` for discovery → Use \`search(mode="hybrid", query="...")\` instead
+- \`Task(subagent_type="Explore")\` → Use \`search(mode="hybrid")\` instead
+
+✅ **ALWAYS DO THIS:**
+1. \`search(mode="hybrid", query="what you're looking for")\`
+2. Only use local tools (Glob/Grep/Read) if ContextStream returns **0 results**
+3. Use Read ONLY for exact file edits after you know the file path
+
+This applies to **EVERY search** throughout the **ENTIRE conversation**, not just the first message.
+
+---
+
+## 🚨 CRITICAL RULE #2 - AUTO-INDEXING 🚨
+
+**ContextStream auto-indexes your project on \`session_init\`.** You do NOT need to:
+- Ask the user to index
+- Manually trigger ingestion
+- Check index_status before every search
+
+**When \`session_init\` returns \`indexing_status: "started"\` or \`"refreshing"\`:**
+- Background indexing is running automatically
+- Search results will be available within seconds to minutes
+- **DO NOT fall back to local tools** - wait for ContextStream search to work
+- If search returns 0 results initially, try again after a moment
+
+**Only manually trigger indexing if:**
+- \`session_init\` returned \`ingest_recommendation.recommended: true\` (rare edge case)
+- User explicitly asks to re-index
 
 ---
 
@@ -153,18 +186,20 @@ If context still feels missing, use \`session(action="recall", query="...")\` fo
 
 ---
 
-### Index & Graph Preflight (REQUIRED for code/file search)
+### Index Status (Auto-Managed)
 
-Before searching files or code, confirm the project is indexed and the graph is available:
+**Indexing is automatic.** After \`session_init\`, the project is auto-indexed in the background.
 
-1. \`project(action="index_status")\` for the current project
-2. If missing/stale:
-   - Local repo: \`project(action="ingest_local", path="<cwd>")\`
-   - Otherwise: \`project(action="index")\`
-3. If graph queries are empty/unavailable: \`graph(action="ingest")\`
-4. If indexing is in progress, tell the user and wait; do not fall back to local scans.
+**You do NOT need to manually check index_status before every search.** Just use \`search()\`.
 
-Only after this preflight, proceed with search/analysis below.
+**If search returns 0 results and you expected matches:**
+1. Check if \`session_init\` returned \`indexing_status: "started"\` - indexing may still be in progress
+2. Wait a moment and retry \`search()\`
+3. Only as a last resort: \`project(action="index_status")\` to check
+
+**Graph data:** If graph queries (\`dependencies\`, \`impact\`) return empty, run \`graph(action="ingest")\` once.
+
+**NEVER fall back to local tools (Glob/Grep/Read) just because search returned 0 results on first try.** Retry first.
 
 ### Search & Code Intelligence (ContextStream-first)
 
@@ -250,13 +285,44 @@ If ContextStream returns results, stop and use them. NEVER use local Search/Expl
 
 ---
 
-### Plans & Tasks
+### 🚨 Plans & Tasks - USE CONTEXTSTREAM, NOT FILE-BASED PLANS 🚨
 
-When user asks to create a plan or implementation roadmap:
-1. Create plan: \`session(action="capture_plan", title="Plan Title", description="...", goals=["goal1", "goal2"], steps=[{id: "1", title: "Step 1", order: 1}, ...])\`
-2. Get plan_id from response, then create tasks: \`memory(action="create_task", title="Task Title", plan_id="<plan_id>", priority="high|medium|low", description="...")\`
+**CRITICAL: When the user requests planning, implementation plans, roadmaps, task breakdowns, or step-by-step approaches:**
 
-To manage existing plans/tasks:
+❌ **DO NOT** use built-in plan mode (EnterPlanMode tool)
+❌ **DO NOT** write plans to markdown files or plan documents
+❌ **DO NOT** ask "should I create a plan file?"
+
+✅ **ALWAYS** use ContextStream's plan/task system instead
+
+**Trigger phrases to detect (use ContextStream immediately):**
+- "create a plan", "make a plan", "plan this", "plan for"
+- "implementation plan", "roadmap", "milestones"
+- "break down", "breakdown", "break this into steps"
+- "what are the steps", "step by step", "outline the approach"
+- "task list", "todo list", "action items"
+- "how should we approach", "implementation strategy"
+
+**When detected, immediately:**
+
+1. **Create the plan in ContextStream:**
+\`\`\`
+session(action="capture_plan", title="<descriptive title>", description="<what this plan accomplishes>", goals=["goal1", "goal2"], steps=[{id: "1", title: "Step 1", order: 1, description: "..."}, ...])
+\`\`\`
+
+2. **Create tasks for each step:**
+\`\`\`
+memory(action="create_task", title="<task title>", plan_id="<plan_id from step 1>", priority="high|medium|low", description="<detailed task description>")
+\`\`\`
+
+**Why ContextStream plans are better:**
+- Plans persist across sessions and are searchable
+- Tasks track status (pending/in_progress/completed/blocked)
+- Context is preserved with workspace/project association
+- Can be retrieved with \`session(action="get_plan", plan_id="...", include_tasks=true)\`
+- Future sessions can continue from where you left off
+
+**Managing plans/tasks:**
 - List plans: \`session(action="list_plans")\`
 - Get plan with tasks: \`session(action="get_plan", plan_id="<uuid>", include_tasks=true)\`
 - List tasks: \`memory(action="list_tasks", plan_id="<uuid>")\` or \`memory(action="list_tasks")\` for all
@@ -296,13 +362,25 @@ See full documentation: https://contextstream.io/docs/mcp/tools
 `.trim();
 
 const CONTEXTSTREAM_RULES_MINIMAL = `
-## 🚨 CRITICAL RULE - READ EVERY TURN 🚨
+## 🚨 CRITICAL: CONTEXTSTREAM SEARCH FIRST 🚨
 
-**BEFORE using Glob, Grep, Search, Read (for discovery), or Explore:**
+**BEFORE using Glob, Grep, Search, Read (for discovery), Explore, or ANY local scanning:**
 \`\`\`
 STOP → Call search(mode="hybrid", query="...") FIRST
 \`\`\`
-Only use local tools if ContextStream returns 0 results. This applies to EVERY search throughout the ENTIRE conversation, not just the first message.
+
+**Claude Code:** Tools are \`mcp__contextstream__search\`, \`mcp__contextstream__session_init\`, etc.
+
+❌ **NEVER:** \`Glob\`, \`Grep\`, \`Read\` for discovery, \`Task(Explore)\`
+✅ **ALWAYS:** \`search(mode="hybrid", query="...")\` first, local tools ONLY if 0 results
+
+---
+
+## 🚨 AUTO-INDEXING 🚨
+
+**\`session_init\` auto-indexes your project.** No manual ingestion needed.
+
+If \`indexing_status: "started"\`: Search will work shortly. **DO NOT fall back to local tools.**
 
 ---
 
@@ -355,17 +433,16 @@ search(mode="hybrid", query="function implementation") → done (results include
 
 **Why?** ContextStream search returns semantic matches + context + file locations in ONE call. Local tools require multiple round-trips.
 
-- **First message**: Call \`session_init\` with context_hint, then call \`context_smart\` before any other tool or response
-- **On [INGEST_RECOMMENDED]**: Ask the user if they want to enable semantic code search. Explain: "Indexing your codebase enables AI-powered code search, dependency analysis, and better context. This takes a few minutes." If user agrees, run the provided \`project(action="ingest_local")\` command.
-- **Every message after**: Always call \`context_smart\` BEFORE responding (semantic search for relevant context)
-- **Before searching files/code**: Check \`project(action="index_status")\`; if missing/stale run \`project(action="ingest_local", path="<cwd>")\` or \`project(action="index")\`, and use \`graph(action="ingest")\` if needed
-- **For discovery**: Use \`session(action="smart_search")\` or \`search(mode="hybrid")\` — NEVER use local Glob/Grep/Read first
-- **For file/function/config lookups**: Use \`search\`/\`graph\` first; only fall back to rg/ls/find if ContextStream returns no results
-- **If ContextStream returns results**: Do NOT use local Search/Explore/Read; only open specific files when needed for exact edits
-- **For code analysis**: Use \`graph(action="dependencies")\` or \`graph(action="impact")\` for call/dependency analysis
+- **First message**: Call \`session_init\` with context_hint, then \`context_smart\` before any other tool
+- **Every message**: Call \`context_smart\` BEFORE responding
+- **For discovery**: Use \`search(mode="hybrid")\` — **NEVER use local Glob/Grep/Read first**
+- **If search returns 0 results**: Retry once (indexing may be in progress), THEN try local tools
+- **For file lookups**: Use \`search\`/\`graph\` first; fall back to local ONLY if ContextStream returns nothing
+- **If ContextStream returns results**: Do NOT use local tools; Read ONLY for exact edits
+- **For code analysis**: \`graph(action="dependencies")\` or \`graph(action="impact")\`
 - **On [RULES_NOTICE]**: Use \`generate_rules()\` to update rules
-- **After completing work**: Always capture decisions/insights with \`session(action="capture")\`
-- **On mistakes/corrections**: Immediately capture lessons with \`session(action="capture_lesson")\`
+- **After completing work**: Capture with \`session(action="capture")\`
+- **On mistakes**: Capture with \`session(action="capture_lesson")\`
 
 ### Search Mode Selection
 
@@ -399,20 +476,26 @@ Use \`output_format\` to reduce response size:
 **Example:** User asks "how many TODO comments?" →
 \`search(mode="exhaustive", query="TODO", output_format="count")\` returns \`{total: 47}\` (not 47 full results)
 
-### Plans & Tasks
+### 🚨 Plans & Tasks - USE CONTEXTSTREAM, NOT FILE-BASED PLANS 🚨
 
-When user asks to create a plan or implementation roadmap:
-1. Create plan: \`session(action="capture_plan", title="Plan Title", description="...", goals=["goal1", "goal2"], steps=[{id: "1", title: "Step 1", order: 1}, ...])\`
-2. Get plan_id from response, then create tasks: \`memory(action="create_task", title="Task Title", plan_id="<plan_id>", priority="high|medium|low", description="...")\`
+**CRITICAL: When user requests planning, implementation plans, roadmaps, or task breakdowns:**
 
-To manage existing plans/tasks:
+❌ **DO NOT** use built-in plan mode (EnterPlanMode) or write plan files
+✅ **ALWAYS** use ContextStream's plan/task system
+
+**Trigger phrases (use ContextStream immediately):**
+- "plan", "roadmap", "milestones", "break down", "steps", "task list", "implementation strategy"
+
+**Create plans in ContextStream:**
+1. \`session(action="capture_plan", title="...", description="...", goals=[...], steps=[{id: "1", title: "Step 1", order: 1}, ...])\`
+2. \`memory(action="create_task", title="...", plan_id="<plan_id>", priority="high|medium|low", description="...")\`
+
+**Manage plans/tasks:**
 - List plans: \`session(action="list_plans")\`
 - Get plan with tasks: \`session(action="get_plan", plan_id="<uuid>", include_tasks=true)\`
 - List tasks: \`memory(action="list_tasks", plan_id="<uuid>")\` or \`memory(action="list_tasks")\` for all
 - Update task status: \`memory(action="update_task", task_id="<uuid>", task_status="pending|in_progress|completed|blocked")\`
-- Link task to plan: \`memory(action="update_task", task_id="<uuid>", plan_id="<plan_uuid>")\`
-- Unlink task from plan: \`memory(action="update_task", task_id="<uuid>", plan_id=null)\`
-- Delete: \`memory(action="delete_task", task_id="<uuid>")\` or \`memory(action="delete_event", event_id="<plan_uuid>")\`
+- Delete: \`memory(action="delete_task", task_id="<uuid>")\`
 
 Full docs: https://contextstream.io/docs/mcp/tools
 `.trim();

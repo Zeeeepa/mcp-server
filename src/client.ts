@@ -4229,6 +4229,42 @@ export class ContextStreamClient {
   }
 
   // ============================================
+  // Notion Integration Methods
+  // ============================================
+
+  /**
+   * Create a page in Notion
+   */
+  async createNotionPage(params: {
+    workspace_id?: string;
+    title: string;
+    content?: string;
+    parent_database_id?: string;
+    parent_page_id?: string;
+  }): Promise<{
+    id: string;
+    url: string;
+    title: string;
+    created_time: string;
+    last_edited_time: string;
+  }> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for creating Notion pages");
+    }
+    return request(this.config, `/integrations/notion/pages`, {
+      method: "POST",
+      body: JSON.stringify({
+        workspace_id: withDefaults.workspace_id,
+        title: params.title,
+        content: params.content,
+        parent_database_id: params.parent_database_id,
+        parent_page_id: params.parent_page_id,
+      }),
+    });
+  }
+
+  // ============================================
   // Reminder Methods
   // ============================================
 

@@ -125,6 +125,12 @@ export const TOOL_CATALOG: ToolCategory[] = [
       { name: "embeddings", hint: "vectors" },
     ],
   },
+  {
+    name: "Notion",
+    tools: [
+      { name: "create_page", hint: "new-page" },
+    ],
+  },
 ];
 
 export type CatalogFormat = "grouped" | "minimal" | "full";
