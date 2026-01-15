@@ -2171,8 +2171,9 @@ export function registerTools(
     checked: boolean;
     slack: boolean;
     github: boolean;
+    notion: boolean;
     workspaceId?: string;
-  } = { checked: false, slack: false, github: false };
+  } = { checked: false, slack: false, github: false, notion: false };
 
   // Track if we've already notified about tools list change
   let toolsListChangedNotified = false;
@@ -2183,15 +2184,15 @@ export function registerTools(
    */
   async function checkIntegrationStatus(
     workspaceId?: string
-  ): Promise<{ slack: boolean; github: boolean }> {
+  ): Promise<{ slack: boolean; github: boolean; notion: boolean }> {
     // If we already checked for this workspace, return cached result
     if (integrationStatus.checked && integrationStatus.workspaceId === workspaceId) {
-      return { slack: integrationStatus.slack, github: integrationStatus.github };
+      return { slack: integrationStatus.slack, github: integrationStatus.github, notion: integrationStatus.notion };
     }
 
     // If no workspace, assume no integrations
     if (!workspaceId) {
-      return { slack: false, github: false };
+      return { slack: false, github: false, notion: false };
     }
 
     try {
@@ -2206,23 +2207,29 @@ export function registerTools(
           (s: { provider: string; status: string }) =>
             s.provider === "github" && s.status === "connected"
         ) ?? false;
+      const notionConnected =
+        status?.some(
+          (s: { provider: string; status: string }) =>
+            s.provider === "notion" && s.status === "connected"
+        ) ?? false;
 
       integrationStatus = {
         checked: true,
         slack: slackConnected,
         github: githubConnected,
+        notion: notionConnected,
         workspaceId,
       };
 
       console.error(
-        `[ContextStream] Integration status: Slack=${slackConnected}, GitHub=${githubConnected}`
+        `[ContextStream] Integration status: Slack=${slackConnected}, GitHub=${githubConnected}, Notion=${notionConnected}`
       );
 
-      return { slack: slackConnected, github: githubConnected };
+      return { slack: slackConnected, github: githubConnected, notion: notionConnected };
     } catch (error) {
       console.error("[ContextStream] Failed to check integration status:", error);
       // On error, assume no integrations
-      return { slack: false, github: false };
+      return { slack: false, github: false, notion: false };
     }
   }
 
@@ -2231,22 +2238,24 @@ export function registerTools(
    * If integrations are newly detected, emit tools/list_changed notification.
    */
   function updateIntegrationStatus(
-    status: { slack: boolean; github: boolean },
+    status: { slack: boolean; github: boolean; notion: boolean },
     workspaceId?: string
   ) {
     const hadSlack = integrationStatus.slack;
     const hadGithub = integrationStatus.github;
+    const hadNotion = integrationStatus.notion;
 
     integrationStatus = {
       checked: true,
       slack: status.slack,
       github: status.github,
+      notion: status.notion,
       workspaceId,
     };
 
     // If integrations were newly detected and we're auto-hiding, notify about tool list change
     if (AUTO_HIDE_INTEGRATIONS && !toolsListChangedNotified) {
-      const newlyConnected = (!hadSlack && status.slack) || (!hadGithub && status.github);
+      const newlyConnected = (!hadSlack && status.slack) || (!hadGithub && status.github) || (!hadNotion && status.notion);
       if (newlyConnected) {
         try {
           // Emit notification that tools list has changed
@@ -2274,10 +2283,11 @@ export function registerTools(
     // Determine which integration this tool requires
     const requiresSlack = SLACK_TOOLS.has(toolName);
     const requiresGithub = GITHUB_TOOLS.has(toolName);
+    const requiresNotion = NOTION_TOOLS.has(toolName);
     const requiresCrossIntegration = CROSS_INTEGRATION_TOOLS.has(toolName);
 
     // Not an integration tool
-    if (!requiresSlack && !requiresGithub && !requiresCrossIntegration) {
+    if (!requiresSlack && !requiresGithub && !requiresNotion && !requiresCrossIntegration) {
       return null;
     }
 
@@ -2321,6 +2331,20 @@ export function registerTools(
       );
     }
 
+    // Gate Notion tools
+    if (requiresNotion && !status.notion) {
+      return errorResult(
+        [
+          `Integration not connected: \`${toolName}\` requires Notion integration.`,
+          "",
+          "To use Notion tools:",
+          "1. Go to https://contextstream.io/settings/integrations",
+          "2. Connect your Notion workspace",
+          "3. Try this command again",
+        ].join("\n")
+      );
+    }
+
     // Gate cross-integration tools (require at least one integration)
     if (requiresCrossIntegration && !status.slack && !status.github) {
       return errorResult(
@@ -2360,6 +2384,11 @@ export function registerTools(
     // Register GitHub tools only if GitHub is connected
     if (GITHUB_TOOLS.has(toolName)) {
       return integrationStatus.github;
+    }
+
+    // Register Notion tools only if Notion is connected
+    if (NOTION_TOOLS.has(toolName)) {
+      return integrationStatus.notion;
     }
 
     // Register cross-integration tools if at least one integration is connected
@@ -7220,7 +7249,12 @@ Use this to verify integrations are healthy and syncing properly.`,
             (s: { provider: string; status: string }) =>
               s.provider === "github" && s.status === "connected"
           ) ?? false;
-        updateIntegrationStatus({ slack: slackConnected, github: githubConnected }, workspaceId);
+        const notionConnected =
+          result?.some(
+            (s: { provider: string; status: string }) =>
+              s.provider === "notion" && s.status === "connected"
+          ) ?? false;
+        updateIntegrationStatus({ slack: slackConnected, github: githubConnected, notion: notionConnected }, workspaceId);
       }
 
       if (result.length === 0) {
