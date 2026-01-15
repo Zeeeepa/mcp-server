@@ -4264,6 +4264,299 @@ export class ContextStreamClient {
     });
   }
 
+  /**
+   * Get Notion integration statistics and overview
+   */
+  async notionStats(params: { workspace_id?: string; days?: number }): Promise<{
+    summary: {
+      total_pages: number;
+      total_databases: number;
+      synced_pages: number;
+    };
+    databases: Array<{
+      id: string;
+      title: string;
+      page_count: number;
+      last_synced_at: string | null;
+    }>;
+  }> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for Notion stats");
+    }
+    const query = new URLSearchParams();
+    if (params?.days) query.set("days", String(params.days));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(
+      this.config,
+      `/integrations/workspaces/${withDefaults.workspace_id}/notion/stats${suffix}`,
+      { method: "GET" }
+    );
+  }
+
+  /**
+   * Get recent Notion activity feed
+   */
+  async notionActivity(params: {
+    workspace_id?: string;
+    limit?: number;
+    database_id?: string;
+  }): Promise<
+    Array<{
+      id: string;
+      title: string;
+      database_id: string | null;
+      database_name: string | null;
+      url: string;
+      created_time: string;
+      last_edited_time: string;
+      content_preview: string | null;
+    }>
+  > {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for Notion activity");
+    }
+    const query = new URLSearchParams();
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.database_id) query.set("database_id", params.database_id);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(
+      this.config,
+      `/integrations/workspaces/${withDefaults.workspace_id}/notion/activity${suffix}`,
+      { method: "GET" }
+    );
+  }
+
+  /**
+   * Get knowledge extracted from Notion (decisions, lessons, insights)
+   */
+  async notionKnowledge(params: {
+    workspace_id?: string;
+    limit?: number;
+    node_type?: string;
+  }): Promise<
+    Array<{
+      id: string;
+      node_type: string;
+      title: string;
+      summary: string;
+      confidence: number;
+      source_type: string;
+      occurred_at: string;
+      tags: string[];
+    }>
+  > {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for Notion knowledge");
+    }
+    const query = new URLSearchParams();
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.node_type) query.set("node_type", params.node_type);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(
+      this.config,
+      `/integrations/workspaces/${withDefaults.workspace_id}/notion/knowledge${suffix}`,
+      { method: "GET" }
+    );
+  }
+
+  /**
+   * Get Notion summary for a workspace
+   */
+  async notionSummary(params: {
+    workspace_id?: string;
+    days?: number;
+    database_id?: string;
+  }): Promise<{
+    period: { start: string; end: string };
+    stats: {
+      pages_created: number;
+      pages_updated: number;
+      total_synced: number;
+    };
+    highlights: Array<{
+      type: string;
+      title: string;
+      summary: string;
+    }>;
+  }> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for Notion summary");
+    }
+    const query = new URLSearchParams();
+    if (params?.days) query.set("days", String(params.days));
+    if (params?.database_id) query.set("database_id", params.database_id);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(
+      this.config,
+      `/integrations/workspaces/${withDefaults.workspace_id}/notion/summary${suffix}`,
+      { method: "GET" }
+    );
+  }
+
+  /**
+   * List Notion databases available in the workspace
+   */
+  async notionListDatabases(params: {
+    workspace_id?: string;
+  }): Promise<
+    Array<{
+      id: string;
+      title: string;
+      description: string | null;
+      icon: string | null;
+      url: string | null;
+      page_count: number;
+    }>
+  > {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for listing Notion databases");
+    }
+    return request(
+      this.config,
+      `/integrations/workspaces/${withDefaults.workspace_id}/notion/databases`,
+      { method: "GET" }
+    );
+  }
+
+  /**
+   * Search/list pages in Notion
+   */
+  async notionSearchPages(params: {
+    workspace_id?: string;
+    query?: string;
+    database_id?: string;
+    limit?: number;
+  }): Promise<
+    Array<{
+      id: string;
+      title: string;
+      url: string;
+      icon: string | null;
+      parent_database_id: string | null;
+      created_time: string;
+      last_edited_time: string;
+    }>
+  > {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for searching Notion pages");
+    }
+    const query = new URLSearchParams();
+    if (params?.query) query.set("query", params.query);
+    if (params?.database_id) query.set("database_id", params.database_id);
+    if (params?.limit) query.set("limit", String(params.limit));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(
+      this.config,
+      `/integrations/workspaces/${withDefaults.workspace_id}/notion/pages${suffix}`,
+      { method: "GET" }
+    );
+  }
+
+  /**
+   * Get a specific Notion page with its content
+   */
+  async notionGetPage(params: {
+    workspace_id?: string;
+    page_id: string;
+  }): Promise<{
+    id: string;
+    title: string;
+    url: string;
+    icon: string | null;
+    parent_database_id: string | null;
+    created_time: string;
+    last_edited_time: string;
+    content: string;
+    properties: Record<string, unknown>;
+  }> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for getting Notion page");
+    }
+    return request(
+      this.config,
+      `/integrations/workspaces/${withDefaults.workspace_id}/notion/pages/${params.page_id}`,
+      { method: "GET" }
+    );
+  }
+
+  /**
+   * Query a Notion database (get rows with optional filters)
+   */
+  async notionQueryDatabase(params: {
+    workspace_id?: string;
+    database_id: string;
+    filter?: Record<string, unknown>;
+    sorts?: Array<{ property: string; direction: "ascending" | "descending" }>;
+    limit?: number;
+  }): Promise<{
+    results: Array<{
+      id: string;
+      properties: Record<string, unknown>;
+      url: string;
+      created_time: string;
+      last_edited_time: string;
+    }>;
+    has_more: boolean;
+    next_cursor: string | null;
+  }> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for querying Notion database");
+    }
+    return request(
+      this.config,
+      `/integrations/workspaces/${withDefaults.workspace_id}/notion/databases/${params.database_id}/query`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          filter: params.filter,
+          sorts: params.sorts,
+          page_size: params.limit,
+        }),
+      }
+    );
+  }
+
+  /**
+   * Update a Notion page
+   */
+  async notionUpdatePage(params: {
+    workspace_id?: string;
+    page_id: string;
+    title?: string;
+    content?: string;
+    properties?: Record<string, unknown>;
+  }): Promise<{
+    id: string;
+    url: string;
+    title: string;
+    last_edited_time: string;
+  }> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for updating Notion page");
+    }
+    return request(
+      this.config,
+      `/integrations/workspaces/${withDefaults.workspace_id}/notion/pages/${params.page_id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          title: params.title,
+          content: params.content,
+          properties: params.properties,
+        }),
+      }
+    );
+  }
+
   // ============================================
   // Reminder Methods
   // ============================================

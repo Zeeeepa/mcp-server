@@ -1016,6 +1016,15 @@ const GITHUB_TOOLS = new Set<string>([
 
 const NOTION_TOOLS = new Set<string>([
   "notion_create_page",
+  "notion_list_databases",
+  "notion_search_pages",
+  "notion_get_page",
+  "notion_query_database",
+  "notion_update_page",
+  "notion_stats",
+  "notion_activity",
+  "notion_knowledge",
+  "notion_summary",
 ]);
 
 const CROSS_INTEGRATION_TOOLS = new Set<string>([
@@ -1346,6 +1355,15 @@ const TOOL_BUNDLES: Record<string, Set<string>> = {
     "github_knowledge",
     "github_summary",
     "notion_create_page",
+    "notion_list_databases",
+    "notion_search_pages",
+    "notion_get_page",
+    "notion_query_database",
+    "notion_update_page",
+    "notion_stats",
+    "notion_activity",
+    "notion_knowledge",
+    "notion_summary",
     "integrations_status",
     "integrations_search",
     "integrations_summary",
@@ -1594,7 +1612,7 @@ const CONSOLIDATED_TOOLS = new Set<string>([
   "project", // Consolidates projects_list, projects_create, etc.
   "workspace", // Consolidates workspaces_list, workspace_associate, etc.
   "reminder", // Consolidates reminders_list, reminders_create, etc.
-  "integration", // Consolidates slack_*, github_*, integrations_*
+  "integration", // Consolidates slack_*, github_*, notion_*, integrations_*
   "help", // Consolidates session_tools, auth_me, mcp_server_version, etc.
 ]);
 
@@ -2089,6 +2107,15 @@ export function registerTools(
     "github_search",
     // Notion integration tools
     "notion_create_page",
+    "notion_list_databases",
+    "notion_search_pages",
+    "notion_get_page",
+    "notion_query_database",
+    "notion_update_page",
+    "notion_stats",
+    "notion_activity",
+    "notion_knowledge",
+    "notion_summary",
   ]);
 
   const proTools = (() => {
@@ -9185,15 +9212,15 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
     );
 
     // -------------------------------------------------------------------------
-    // integration - Consolidates Slack/GitHub/cross-integration tools
+    // integration - Consolidates Slack/GitHub/Notion/cross-integration tools
     // -------------------------------------------------------------------------
     registerTool(
       "integration",
       {
         title: "Integration",
-        description: `Integration operations for Slack and GitHub. Provider: slack, github, all. Actions: status, search, stats, activity, contributors, knowledge, summary, channels (slack), discussions (slack), repos (github), issues (github).`,
+        description: `Integration operations for Slack, GitHub, and Notion. Provider: slack, github, notion, all. Actions: status, search, stats, activity, contributors, knowledge, summary, channels (slack), discussions (slack), repos (github), issues (github), create_page (notion), list_databases (notion), search_pages (notion), get_page (notion), query_database (notion), update_page (notion).`,
         inputSchema: z.object({
-          provider: z.enum(["slack", "github", "all"]).describe("Integration provider"),
+          provider: z.enum(["slack", "github", "notion", "all"]).describe("Integration provider"),
           action: z
             .enum([
               "status",
@@ -9208,6 +9235,13 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
               "sync_users",
               "repos",
               "issues",
+              // Notion-specific actions
+              "create_page",
+              "list_databases",
+              "search_pages",
+              "get_page",
+              "query_database",
+              "update_page",
             ])
             .describe("Action to perform"),
           workspace_id: z.string().uuid().optional(),
@@ -9216,6 +9250,21 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
           limit: z.number().optional(),
           since: z.string().optional(),
           until: z.string().optional(),
+          // Notion-specific parameters
+          title: z.string().optional().describe("Page title (for Notion create_page/update_page)"),
+          content: z.string().optional().describe("Page content in Markdown (for Notion create_page/update_page)"),
+          parent_database_id: z.string().optional().describe("Parent database ID (for Notion create_page)"),
+          parent_page_id: z.string().optional().describe("Parent page ID (for Notion create_page)"),
+          page_id: z.string().optional().describe("Page ID (for Notion get_page/update_page)"),
+          database_id: z.string().optional().describe("Database ID (for Notion query_database/search_pages/activity)"),
+          days: z.number().optional().describe("Number of days for stats/summary (default: 7)"),
+          node_type: z.string().optional().describe("Filter knowledge by type (for Notion knowledge)"),
+          filter: z.record(z.unknown()).optional().describe("Query filter (for Notion query_database)"),
+          sorts: z.array(z.object({
+            property: z.string(),
+            direction: z.enum(["ascending", "descending"]),
+          })).optional().describe("Sort order (for Notion query_database)"),
+          properties: z.record(z.unknown()).optional().describe("Page properties (for Notion update_page)"),
         }),
       },
       async (input) => {
@@ -9228,7 +9277,9 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
             ? "slack_search"
             : input.provider === "github"
               ? "github_search"
-              : "integrations_status"
+              : input.provider === "notion"
+                ? "notion_create_page"
+                : "integrations_status"
         );
         if (integrationGated) return integrationGated;
 
@@ -9300,8 +9351,17 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
                 content: [{ type: "text" as const, text: formatContent(result) }],
                 structuredContent: toStructured(result),
               };
+            } else if (input.provider === "notion") {
+              const result = await client.notionStats({
+                workspace_id: workspaceId,
+                days: input.days,
+              });
+              return {
+                content: [{ type: "text" as const, text: formatContent(result) }],
+                structuredContent: toStructured(result),
+              };
             }
-            return errorResult("stats requires provider: slack or github");
+            return errorResult("stats requires provider: slack, github, or notion");
           }
 
           case "activity": {
@@ -9317,8 +9377,18 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
                 content: [{ type: "text" as const, text: formatContent(result) }],
                 structuredContent: toStructured(result),
               };
+            } else if (input.provider === "notion") {
+              const result = await client.notionActivity({
+                workspace_id: workspaceId,
+                limit: input.limit,
+                database_id: input.database_id,
+              });
+              return {
+                content: [{ type: "text" as const, text: formatContent(result) }],
+                structuredContent: toStructured(result),
+              };
             }
-            return errorResult("activity requires provider: slack or github");
+            return errorResult("activity requires provider: slack, github, or notion");
           }
 
           case "contributors": {
@@ -9351,6 +9421,16 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
                 content: [{ type: "text" as const, text: formatContent(result) }],
                 structuredContent: toStructured(result),
               };
+            } else if (input.provider === "notion") {
+              const result = await client.notionKnowledge({
+                workspace_id: workspaceId,
+                limit: input.limit,
+                node_type: input.node_type,
+              });
+              return {
+                content: [{ type: "text" as const, text: formatContent(result) }],
+                structuredContent: toStructured(result),
+              };
             } else {
               const result = await client.integrationsKnowledge(params);
               return {
@@ -9369,6 +9449,16 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
               };
             } else if (input.provider === "github") {
               const result = await client.githubSummary(params);
+              return {
+                content: [{ type: "text" as const, text: formatContent(result) }],
+                structuredContent: toStructured(result),
+              };
+            } else if (input.provider === "notion") {
+              const result = await client.notionSummary({
+                workspace_id: workspaceId,
+                days: input.days,
+                database_id: input.database_id,
+              });
               return {
                 content: [{ type: "text" as const, text: formatContent(result) }],
                 structuredContent: toStructured(result),
@@ -9434,6 +9524,157 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
             return {
               content: [{ type: "text" as const, text: formatContent(result) }],
               structuredContent: toStructured(result),
+            };
+          }
+
+          case "create_page": {
+            if (input.provider !== "notion") {
+              return errorResult("create_page is only available for notion provider");
+            }
+            if (!input.title) {
+              return errorResult("title is required for create_page action");
+            }
+            if (!workspaceId) {
+              return errorResult(
+                "Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly."
+              );
+            }
+            const result = await client.createNotionPage({
+              workspace_id: workspaceId,
+              title: input.title,
+              content: input.content,
+              parent_database_id: input.parent_database_id,
+              parent_page_id: input.parent_page_id,
+            });
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: `Page created successfully!\n\nTitle: ${result.title}\nURL: ${result.url}\nID: ${result.id}\nCreated: ${result.created_time}`,
+                },
+              ],
+              structuredContent: toStructured(result),
+            };
+          }
+
+          case "list_databases": {
+            if (input.provider !== "notion") {
+              return errorResult("list_databases is only available for notion provider");
+            }
+            if (!workspaceId) {
+              return errorResult(
+                "Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly."
+              );
+            }
+            const databases = await client.notionListDatabases({
+              workspace_id: workspaceId,
+            });
+            return {
+              content: [{ type: "text" as const, text: formatContent(databases) }],
+              structuredContent: toStructured(databases),
+            };
+          }
+
+          case "search_pages": {
+            if (input.provider !== "notion") {
+              return errorResult("search_pages is only available for notion provider");
+            }
+            if (!workspaceId) {
+              return errorResult(
+                "Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly."
+              );
+            }
+            const pages = await client.notionSearchPages({
+              workspace_id: workspaceId,
+              query: input.query,
+              database_id: input.database_id,
+              limit: input.limit,
+            });
+            return {
+              content: [{ type: "text" as const, text: formatContent(pages) }],
+              structuredContent: toStructured(pages),
+            };
+          }
+
+          case "get_page": {
+            if (input.provider !== "notion") {
+              return errorResult("get_page is only available for notion provider");
+            }
+            if (!input.page_id) {
+              return errorResult("page_id is required for get_page action");
+            }
+            if (!workspaceId) {
+              return errorResult(
+                "Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly."
+              );
+            }
+            const page = await client.notionGetPage({
+              workspace_id: workspaceId,
+              page_id: input.page_id,
+            });
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: `# ${page.title}\n\nID: ${page.id}\nURL: ${page.url}\nCreated: ${page.created_time}\nLast edited: ${page.last_edited_time}\n\n---\n\n${page.content}`,
+                },
+              ],
+              structuredContent: toStructured(page),
+            };
+          }
+
+          case "query_database": {
+            if (input.provider !== "notion") {
+              return errorResult("query_database is only available for notion provider");
+            }
+            if (!input.database_id) {
+              return errorResult("database_id is required for query_database action");
+            }
+            if (!workspaceId) {
+              return errorResult(
+                "Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly."
+              );
+            }
+            const queryResult = await client.notionQueryDatabase({
+              workspace_id: workspaceId,
+              database_id: input.database_id,
+              filter: input.filter,
+              sorts: input.sorts,
+              limit: input.limit,
+            });
+            return {
+              content: [{ type: "text" as const, text: formatContent(queryResult) }],
+              structuredContent: toStructured(queryResult),
+            };
+          }
+
+          case "update_page": {
+            if (input.provider !== "notion") {
+              return errorResult("update_page is only available for notion provider");
+            }
+            if (!input.page_id) {
+              return errorResult("page_id is required for update_page action");
+            }
+            if (!workspaceId) {
+              return errorResult(
+                "Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly."
+              );
+            }
+            const updatedPage = await client.notionUpdatePage({
+              workspace_id: workspaceId,
+              page_id: input.page_id,
+              title: input.title,
+              content: input.content,
+              properties: input.properties,
+            });
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: `Page updated successfully!\n\nTitle: ${updatedPage.title}\nURL: ${updatedPage.url}\nID: ${updatedPage.id}\nLast edited: ${updatedPage.last_edited_time}`,
+                },
+              ],
+              structuredContent: toStructured(updatedPage),
             };
           }
 
