@@ -90,6 +90,36 @@ This applies to **EVERY search** throughout the **ENTIRE conversation**, not jus
 
 ---
 
+## 🚨 CRITICAL RULE #3 - LESSONS (PAST MISTAKES) 🚨
+
+**Lessons are past mistakes that MUST inform your work.** Ignoring lessons leads to repeated failures.
+
+### On \`session_init\`:
+- Check for \`lessons\` and \`lessons_warning\` in the response
+- If present, **READ THEM IMMEDIATELY** before doing any work
+- These are high-priority lessons (critical/high severity) relevant to your context
+- **Apply the prevention steps** from each lesson to avoid repeating mistakes
+
+### On \`context_smart\`:
+- Check for any lessons in the returned context
+- Lessons may be included based on semantic relevance to the user's message
+
+### Before ANY Non-Trivial Work:
+**ALWAYS call \`session(action="get_lessons", query="<topic>")\`** where \`<topic>\` matches what you're about to do:
+- Before refactoring → \`session(action="get_lessons", query="refactoring")\`
+- Before API changes → \`session(action="get_lessons", query="API changes")\`
+- Before database work → \`session(action="get_lessons", query="database migrations")\`
+- Before deployments → \`session(action="get_lessons", query="deployment")\`
+
+### When Lessons Are Found:
+1. **Summarize the lessons** to the user before proceeding
+2. **Explicitly state how you will avoid the past mistakes**
+3. If a lesson conflicts with the current approach, **warn the user**
+
+**Failing to check lessons before risky work is a critical error.**
+
+---
+
 ## ContextStream v0.4.x Integration (Enhanced)
 
 You have access to ContextStream MCP tools for persistent memory and context.
@@ -100,17 +130,20 @@ Rules Version: ${RULES_VERSION}
 
 | Message | What to Call |
 |---------|--------------|
-| **1st message** | \`session_init(folder_path="...", context_hint="<user's message>")\`, then \`context_smart(user_message="<user's message>", format="minified", max_tokens=400)\` |
+| **1st message** | \`session_init(folder_path="...", context_hint="<user's message>")\`, then \`context_smart(...)\` |
+| **⚠️ After session_init** | **CHECK \`lessons\` field** - if present, read and apply them BEFORE any work |
 | **2nd+ messages** | \`context_smart(user_message="<user's message>", format="minified", max_tokens=400)\` |
 | **🔍 ANY code search** | \`search(mode="hybrid", query="...")\` — ALWAYS before Glob/Grep/Search/Read |
-| **Before risky/non-trivial work** | \`session(action="get_lessons", query="<topic>")\` |
+| **⚠️ Before ANY risky work** | \`session(action="get_lessons", query="<topic>")\` — **MANDATORY, not optional** |
 | **After completing task** | \`session(action="capture", event_type="decision", ...)\` - MUST capture |
 | **User frustration/correction** | \`session(action="capture_lesson", ...)\` - MUST capture lessons |
 | **Command/tool error + fix** | \`session(action="capture_lesson", ...)\` - MUST capture lessons |
 
 **NO EXCEPTIONS.** Do not skip even if you think you have enough context.
 
-**First message rule:** After \`session_init\`, always call \`context_smart\` before any other tool or response.
+**First message rule:** After \`session_init\`:
+1. Check for \`lessons\` in response - if present, READ and SUMMARIZE them to user
+2. Then call \`context_smart\` before any other tool or response
 
 **Context Pack (Pro+):** If enabled, use \`context_smart(..., mode="pack", distill=true)\` for code/file queries. If unavailable or disabled, omit \`mode\` and proceed with standard \`context_smart\` (the API will fall back).
 
@@ -384,6 +417,16 @@ If \`indexing_status: "started"\`: Search will work shortly. **DO NOT fall back 
 
 ---
 
+## 🚨 LESSONS (PAST MISTAKES) - CRITICAL 🚨
+
+**After \`session_init\`:** Check for \`lessons\` field. If present, **READ and APPLY** before any work.
+
+**Before ANY risky work:** \`session(action="get_lessons", query="<topic>")\` — **MANDATORY**
+
+**When lessons found:** Summarize to user, state how you'll avoid past mistakes.
+
+---
+
 ## ContextStream v0.4.x (Consolidated Domain Tools)
 
 v0.4.x uses ~11 consolidated domain tools for ~75% token reduction vs previous versions.
@@ -393,11 +436,12 @@ Rules Version: ${RULES_VERSION}
 
 | Message | What to Call |
 |---------|--------------|
-| **1st message** | \`session_init(folder_path="<cwd>", context_hint="<user_message>")\`, then \`context_smart(user_message="<user_message>", format="minified", max_tokens=400)\` |
+| **1st message** | \`session_init(folder_path="<cwd>", context_hint="<user_message>")\`, then \`context_smart(...)\` |
+| **⚠️ After session_init** | **CHECK \`lessons\` field** — read and apply BEFORE any work |
 | **2nd+ messages** | \`context_smart(user_message="<user_message>", format="minified", max_tokens=400)\` |
 | **🔍 ANY code search** | \`search(mode="hybrid", query="...")\` — ALWAYS before Glob/Grep/Search/Read |
+| **⚠️ Before risky work** | \`session(action="get_lessons", query="<topic>")\` — **MANDATORY** |
 | **Capture decisions** | \`session(action="capture", event_type="decision", title="...", content="...")\` |
-| **Before risky work** | \`session(action="get_lessons", query="<topic>")\` |
 | **On user frustration** | \`session(action="capture_lesson", title="...", trigger="...", impact="...", prevention="...")\` |
 
 **Context Pack (Pro+):** If enabled, use \`context_smart(..., mode="pack", distill=true)\` for code/file queries. If unavailable or disabled, omit \`mode\` and proceed with standard \`context_smart\` (the API will fall back).
