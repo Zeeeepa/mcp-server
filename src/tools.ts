@@ -77,6 +77,47 @@ function generateLessonsReminder(result: Record<string, unknown>): string {
   return `\n\n${LESSONS_REMINDER_PREFIX}\n${lessonLines.join("\n")}`;
 }
 
+/**
+ * Generate aggressive rules update warning when rules are outdated.
+ * This nudges AI to update rules while preserving custom content.
+ */
+function generateRulesUpdateWarning(rulesNotice: RulesNotice | null): string {
+  if (!rulesNotice || (rulesNotice.status !== "behind" && rulesNotice.status !== "missing")) {
+    return "";
+  }
+
+  const isMissing = rulesNotice.status === "missing";
+  const current = rulesNotice.current ?? "none";
+  const latest = rulesNotice.latest;
+
+  return `
+🚨 [RULES ${isMissing ? "MISSING" : "OUTDATED"} - ACTION REQUIRED]
+${isMissing ? "ContextStream rules are NOT installed." : `Rules version ${current} → ${latest} available.`}
+${isMissing ? "AI behavior may be suboptimal without proper rules." : "New rules include important improvements for better AI behavior."}
+
+**UPDATE NOW:** Run \`mcp__contextstream__generate_rules(overwrite_existing=true)\`
+This is SAFE - only the ContextStream block is updated, your custom rules are preserved.
+`.trim();
+}
+
+/**
+ * Generate aggressive MCP version update warning.
+ */
+function generateVersionUpdateWarning(versionNotice: { behind?: boolean; current?: string; latest?: string; upgrade_command?: string } | null): string {
+  if (!versionNotice?.behind) {
+    return "";
+  }
+
+  return `
+🚨 [MCP SERVER OUTDATED - UPDATE RECOMMENDED]
+Current: ${versionNotice.current} → Latest: ${versionNotice.latest}
+New version may include critical bug fixes, performance improvements, and new features.
+
+**UPDATE NOW:** Run \`${versionNotice.upgrade_command || "npm update @contextstream/mcp-server"}\`
+Then restart Claude Code to use the new version.
+`.trim();
+}
+
 const DEFAULT_PARAM_DESCRIPTIONS: Record<string, string> = {
   api_key: "ContextStream API key.",
   apiKey: "ContextStream API key.",
@@ -4947,16 +4988,17 @@ This does semantic search on the first message. You only need context_smart on s
       }
 
       const noticeLines: string[] = [];
-      if (rulesNotice) {
-        const current = rulesNotice.current ?? "unknown";
-        noticeLines.push(
-          `[RULES_NOTICE] status=${rulesNotice.status} current=${current} latest=${rulesNotice.latest} update="${rulesNotice.update_command}"`
-        );
+
+      // Aggressive rules update warning
+      const rulesWarning = generateRulesUpdateWarning(rulesNotice);
+      if (rulesWarning) {
+        noticeLines.push(rulesWarning);
       }
-      if (versionNotice?.behind) {
-        noticeLines.push(
-          `[VERSION_NOTICE] current=${versionNotice.current} latest=${versionNotice.latest} upgrade="${versionNotice.upgrade_command}"`
-        );
+
+      // Aggressive version update warning
+      const versionWarning = generateVersionUpdateWarning(versionNotice);
+      if (versionWarning) {
+        noticeLines.push(versionWarning);
       }
 
       // Add ingest recommendation notice if applicable
@@ -6486,12 +6528,9 @@ This saves ~80% tokens compared to including full chat history.`,
         }
       }
 
-      const rulesNoticeLine = rulesNotice
-        ? `\n[RULES_NOTICE] status=${rulesNotice.status} current=${rulesNotice.current ?? "unknown"} latest=${rulesNotice.latest} update="${rulesNotice.update_command}"`
-        : "";
-      const versionNoticeLine = versionNotice?.behind
-        ? `\n[VERSION_NOTICE] current=${versionNotice.current} latest=${versionNotice.latest} upgrade="${versionNotice.upgrade_command}"`
-        : "";
+      // Generate aggressive warnings for outdated rules/version
+      const rulesWarningLine = generateRulesUpdateWarning(rulesNotice);
+      const versionWarningLine = generateVersionUpdateWarning(versionNotice ?? null);
 
       const enrichedResult = {
         ...result,
@@ -6519,11 +6558,19 @@ This saves ~80% tokens compared to including full chat history.`,
       // Inject search rules reminder to combat instruction decay
       const searchRulesLine = SEARCH_RULES_REMINDER_ENABLED ? `\n\n${SEARCH_RULES_REMINDER}` : "";
 
+      // Combine all warnings (only add non-empty ones with proper spacing)
+      const allWarnings = [
+        lessonsWarningLine,
+        rulesWarningLine ? `\n\n${rulesWarningLine}` : "",
+        versionWarningLine ? `\n\n${versionWarningLine}` : "",
+        searchRulesLine,
+      ].filter(Boolean).join("");
+
       return {
         content: [
           {
             type: "text" as const,
-            text: result.context + footer + lessonsWarningLine + rulesNoticeLine + versionNoticeLine + searchRulesLine,
+            text: result.context + footer + allWarnings,
           },
         ],
         structuredContent: toStructured(enrichedResult),
