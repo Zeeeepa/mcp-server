@@ -4431,6 +4431,40 @@ export class ContextStreamClient {
   }
 
   /**
+   * Create a new Notion database
+   */
+  async notionCreateDatabase(params: {
+    workspace_id?: string;
+    title: string;
+    parent_page_id: string;
+    description?: string;
+  }): Promise<{
+    id: string;
+    title: string;
+    url: string;
+    parent_page_id: string;
+  }> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for creating Notion database");
+    }
+    const query = new URLSearchParams();
+    query.set("workspace_id", withDefaults.workspace_id);
+    return request(
+      this.config,
+      `/integrations/notion/databases?${query.toString()}`,
+      {
+        method: "POST",
+        body: {
+          title: params.title,
+          parent_page_id: params.parent_page_id,
+          description: params.description,
+        },
+      }
+    );
+  }
+
+  /**
    * Search/list pages in Notion with smart type detection filtering
    */
   async notionSearchPages(params: {

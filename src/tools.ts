@@ -9390,7 +9390,7 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
       "integration",
       {
         title: "Integration",
-        description: `Integration operations for Slack, GitHub, and Notion. Provider: slack, github, notion, all. Actions: status, search, stats, activity, contributors, knowledge, summary, channels (slack), discussions (slack), repos (github), issues (github), create_page (notion), list_databases (notion), search_pages (notion with smart type detection - filter by event_type, status, priority, has_due_date, tags), get_page (notion), query_database (notion), update_page (notion).`,
+        description: `Integration operations for Slack, GitHub, and Notion. Provider: slack, github, notion, all. Actions: status, search, stats, activity, contributors, knowledge, summary, channels (slack), discussions (slack), repos (github), issues (github), create_page (notion), create_database (notion), list_databases (notion), search_pages (notion with smart type detection - filter by event_type, status, priority, has_due_date, tags), get_page (notion), query_database (notion), update_page (notion).`,
         inputSchema: z.object({
           provider: z.enum(["slack", "github", "notion", "all"]).describe("Integration provider"),
           action: z
@@ -9409,6 +9409,7 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
               "issues",
               // Notion-specific actions
               "create_page",
+              "create_database",
               "list_databases",
               "search_pages",
               "get_page",
@@ -9423,10 +9424,11 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
           since: z.string().optional(),
           until: z.string().optional(),
           // Notion-specific parameters
-          title: z.string().optional().describe("Page title (for Notion create_page/update_page)"),
+          title: z.string().optional().describe("Page/database title (for Notion create_page/update_page/create_database)"),
           content: z.string().optional().describe("Page content in Markdown (for Notion create_page/update_page)"),
+          description: z.string().optional().describe("Database description (for Notion create_database)"),
           parent_database_id: z.string().optional().describe("Parent database ID (for Notion create_page)"),
-          parent_page_id: z.string().optional().describe("Parent page ID (for Notion create_page)"),
+          parent_page_id: z.string().optional().describe("Parent page ID (for Notion create_page/create_database)"),
           page_id: z.string().optional().describe("Page ID (for Notion get_page/update_page)"),
           database_id: z.string().optional().describe("Database ID (for Notion query_database/search_pages/activity)"),
           days: z.number().optional().describe("Number of days for stats/summary (default: 7)"),
@@ -9733,6 +9735,38 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
                 },
               ],
               structuredContent: toStructured(result),
+            };
+          }
+
+          case "create_database": {
+            if (input.provider !== "notion") {
+              return errorResult("create_database is only available for notion provider");
+            }
+            if (!input.title) {
+              return errorResult("title is required for create_database action");
+            }
+            if (!input.parent_page_id) {
+              return errorResult("parent_page_id is required for create_database action");
+            }
+            if (!workspaceId) {
+              return errorResult(
+                "Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly."
+              );
+            }
+            const newDatabase = await client.notionCreateDatabase({
+              workspace_id: workspaceId,
+              title: input.title,
+              parent_page_id: input.parent_page_id,
+              description: input.description,
+            });
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: `Created database "${newDatabase.title}"\nID: ${newDatabase.id}\nURL: ${newDatabase.url}`,
+                },
+              ],
+              structuredContent: toStructured(newDatabase),
             };
           }
 
