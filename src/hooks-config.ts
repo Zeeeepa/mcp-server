@@ -39,13 +39,21 @@ export const PRETOOLUSE_HOOK_SCRIPT = `#!/usr/bin/env python3
 """
 ContextStream PreToolUse Hook for Claude Code
 Blocks Grep/Glob/Search/Task(Explore)/EnterPlanMode and redirects to ContextStream.
+
+Only blocks if the current project is indexed in ContextStream.
+If not indexed, allows local tools through with a suggestion to index.
 """
 
 import json
 import sys
 import os
+from pathlib import Path
+from datetime import datetime, timedelta
 
 ENABLED = os.environ.get("CONTEXTSTREAM_HOOK_ENABLED", "true").lower() == "true"
+INDEX_STATUS_FILE = Path.home() / ".contextstream" / "indexed-projects.json"
+# Consider index stale after 7 days
+STALE_THRESHOLD_DAYS = 7
 
 DISCOVERY_PATTERNS = ["**/*", "**/", "src/**", "lib/**", "app/**", "components/**"]
 
@@ -67,6 +75,44 @@ def is_discovery_grep(file_path):
         return True
     return False
 
+def is_project_indexed(cwd: str) -> tuple[bool, bool]:
+    """
+    Check if the current directory is in an indexed project.
+    Returns (is_indexed, is_stale).
+    """
+    if not INDEX_STATUS_FILE.exists():
+        return False, False
+
+    try:
+        with open(INDEX_STATUS_FILE, "r") as f:
+            data = json.load(f)
+    except:
+        return False, False
+
+    projects = data.get("projects", {})
+    cwd_path = Path(cwd).resolve()
+
+    # Check if cwd is within any indexed project
+    for project_path, info in projects.items():
+        try:
+            indexed_path = Path(project_path).resolve()
+            # Check if cwd is the project or a subdirectory
+            if cwd_path == indexed_path or indexed_path in cwd_path.parents:
+                # Check if stale
+                indexed_at = info.get("indexed_at")
+                if indexed_at:
+                    try:
+                        indexed_time = datetime.fromisoformat(indexed_at.replace("Z", "+00:00"))
+                        if datetime.now(indexed_time.tzinfo) - indexed_time > timedelta(days=STALE_THRESHOLD_DAYS):
+                            return True, True  # Indexed but stale
+                    except:
+                        pass
+                return True, False  # Indexed and fresh
+        except:
+            continue
+
+    return False, False
+
 def main():
     if not ENABLED:
         sys.exit(0)
@@ -78,6 +124,20 @@ def main():
 
     tool = data.get("tool_name", "")
     inp = data.get("tool_input", {})
+    cwd = data.get("cwd", os.getcwd())
+
+    # Check if project is indexed
+    is_indexed, is_stale = is_project_indexed(cwd)
+
+    if not is_indexed:
+        # Project not indexed - allow local tools but suggest indexing
+        # Don't block, just exit successfully
+        sys.exit(0)
+
+    if is_stale:
+        # Index is stale - allow with warning (printed but not blocking)
+        # Still allow the tool but remind about re-indexing
+        pass  # Continue to blocking logic but could add warning
 
     if tool == "Glob":
         pattern = inp.get("pattern", "")
@@ -378,4 +438,77 @@ If you prefer to configure manually, add to \`~/.claude/settings.json\`:
 }
 \`\`\`
 `.trim();
+}
+
+/**
+ * Index status file path for tracking which projects are indexed.
+ * The hook script reads this to decide whether to block local tools.
+ */
+export function getIndexStatusPath(): string {
+  return path.join(homedir(), ".contextstream", "indexed-projects.json");
+}
+
+export interface IndexedProjectInfo {
+  indexed_at: string;
+  project_id?: string;
+  project_name?: string;
+}
+
+export interface IndexStatusFile {
+  version: number;
+  projects: Record<string, IndexedProjectInfo>;
+}
+
+/**
+ * Read the current index status file.
+ */
+export async function readIndexStatus(): Promise<IndexStatusFile> {
+  const statusPath = getIndexStatusPath();
+  try {
+    const content = await fs.readFile(statusPath, "utf-8");
+    return JSON.parse(content);
+  } catch {
+    return { version: 1, projects: {} };
+  }
+}
+
+/**
+ * Write the index status file.
+ */
+export async function writeIndexStatus(status: IndexStatusFile): Promise<void> {
+  const statusPath = getIndexStatusPath();
+  const dir = path.dirname(statusPath);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(statusPath, JSON.stringify(status, null, 2));
+}
+
+/**
+ * Mark a project as indexed. Called after successful ingest_local or index.
+ */
+export async function markProjectIndexed(
+  projectPath: string,
+  options?: { project_id?: string; project_name?: string }
+): Promise<void> {
+  const status = await readIndexStatus();
+  const resolvedPath = path.resolve(projectPath);
+
+  status.projects[resolvedPath] = {
+    indexed_at: new Date().toISOString(),
+    project_id: options?.project_id,
+    project_name: options?.project_name,
+  };
+
+  await writeIndexStatus(status);
+}
+
+/**
+ * Remove a project from the index status (e.g., on delete or explicit removal).
+ */
+export async function unmarkProjectIndexed(projectPath: string): Promise<void> {
+  const status = await readIndexStatus();
+  const resolvedPath = path.resolve(projectPath);
+
+  delete status.projects[resolvedPath];
+
+  await writeIndexStatus(status);
 }

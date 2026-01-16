@@ -16,7 +16,7 @@ import {
 import { VERSION, getUpdateNotice } from "./version.js";
 import { generateToolCatalog, getCoreToolsHint, type CatalogFormat } from "./tool-catalog.js";
 import { getAuthOverride, runWithAuthOverride, type AuthOverride } from "./auth-context.js";
-import { installClaudeCodeHooks } from "./hooks-config.js";
+import { installClaudeCodeHooks, markProjectIndexed } from "./hooks-config.js";
 
 type StructuredContent = { [x: string]: unknown } | undefined;
 type ToolTextResult = {
@@ -2955,6 +2955,14 @@ export function registerTools(
         console.error(
           `[ContextStream] Completed background ingestion: ${totalIndexed} files in ${batchCount} batches`
         );
+
+        // Mark project as indexed so hooks know to enforce ContextStream-first behavior
+        try {
+          await markProjectIndexed(resolvedPath, { project_id: projectId });
+          console.error(`[ContextStream] Marked project as indexed: ${resolvedPath}`);
+        } catch (markError) {
+          console.error(`[ContextStream] Failed to mark project as indexed:`, markError);
+        }
       } catch (error) {
         console.error(`[ContextStream] Ingestion failed:`, error);
       }
@@ -5028,6 +5036,13 @@ This does semantic search on the first message. You only need context_smart on s
       } else if (ingestRec?.status === "auto_started") {
         noticeLines.push(
           `[INGEST_STATUS] Background indexing started. Codebase will be searchable shortly.`
+        );
+      } else if (folderPathForRules && !ingestRec?.recommended) {
+        // Project is already indexed - mark it so hooks know to enforce ContextStream-first
+        const projectId = typeof result.project_id === "string" ? result.project_id : undefined;
+        const projectName = typeof result.project_name === "string" ? result.project_name : undefined;
+        markProjectIndexed(folderPathForRules, { project_id: projectId, project_name: projectName }).catch(
+          (err) => console.error("[ContextStream] Failed to mark project as indexed:", err)
         );
       }
 
