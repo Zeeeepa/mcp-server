@@ -2254,7 +2254,7 @@ export function registerTools(
     ["graph_call_path", "full"],
     ["graph_circular_dependencies", "full"],
     ["graph_unused_code", "full"],
-    ["graph_ingest", "full"],
+    ["graph_ingest", "lite"], // Pro can ingest (builds module-level graph), Elite gets full graph
     ["graph_contradictions", "full"],
   ]);
 
