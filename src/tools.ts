@@ -8171,7 +8171,7 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
       "memory",
       {
         title: "Memory",
-        description: `Memory operations for events and nodes. Event actions: create_event, get_event, update_event, delete_event, list_events, distill_event. Node actions: create_node, get_node, update_node, delete_node, list_nodes, supersede_node. Query actions: search, decisions, timeline, summary. Task actions: create_task (create task, optionally linked to plan), get_task, update_task (can link/unlink task to plan via plan_id), delete_task, list_tasks, reorder_tasks.`,
+        description: `Memory operations for events and nodes. Event actions: create_event, get_event, update_event, delete_event, list_events, distill_event, import_batch (bulk import array of events). Node actions: create_node, get_node, update_node, delete_node, list_nodes, supersede_node. Query actions: search, decisions, timeline, summary. Task actions: create_task (create task, optionally linked to plan), get_task, update_task (can link/unlink task to plan via plan_id), delete_task, list_tasks, reorder_tasks.`,
         inputSchema: z.object({
           action: z
             .enum([
@@ -8191,6 +8191,8 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
               "decisions",
               "timeline",
               "summary",
+              // Batch actions
+              "import_batch",
               // Task actions
               "create_task",
               "get_task",
@@ -8274,6 +8276,39 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
           task_ids: z.array(z.string().uuid()).optional().describe("Task IDs for reorder_tasks"),
           blocked_reason: z.string().optional().describe("Reason when task is blocked"),
           tags: z.array(z.string()).optional().describe("Tags for task"),
+          // Batch import params
+          events: z
+            .array(
+              z.object({
+                event_type: z.string(),
+                title: z.string(),
+                content: z.string(),
+                metadata: z.record(z.any()).optional(),
+                provenance: z
+                  .object({
+                    repo: z.string().optional(),
+                    branch: z.string().optional(),
+                    commit_sha: z.string().optional(),
+                    pr_url: z.string().url().optional(),
+                    issue_url: z.string().url().optional(),
+                    slack_thread_url: z.string().url().optional(),
+                  })
+                  .optional(),
+                code_refs: z
+                  .array(
+                    z.object({
+                      file_path: z.string(),
+                      symbol_id: z.string().optional(),
+                      symbol_name: z.string().optional(),
+                    })
+                  )
+                  .optional(),
+                tags: z.array(z.string()).optional(),
+                occurred_at: z.string().optional().describe("ISO timestamp for when the event occurred"),
+              })
+            )
+            .optional()
+            .describe("Array of events for import_batch action"),
         }),
       },
       async (input) => {
@@ -8346,6 +8381,36 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
             });
             return {
               content: [{ type: "text" as const, text: formatContent(result) }],
+              structuredContent: toStructured(result),
+            };
+          }
+
+          case "import_batch": {
+            if (!input.events || !Array.isArray(input.events) || input.events.length === 0) {
+              return errorResult("import_batch requires: events (non-empty array of event objects)");
+            }
+            if (!workspaceId) {
+              return errorResult("import_batch requires workspace_id. Call session_init first.");
+            }
+            // Add workspace_id and project_id to each event
+            const eventsWithContext = input.events.map((event: any) => ({
+              ...event,
+              workspace_id: workspaceId,
+              project_id: projectId || event.project_id,
+            }));
+            const result = await client.bulkIngestEvents({
+              workspace_id: workspaceId,
+              project_id: projectId,
+              events: eventsWithContext,
+            });
+            const count = Array.isArray(result) ? result.length : (result as any)?.data?.length ?? 0;
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: `✅ Imported ${count} event(s) successfully.\n\n${formatContent(result)}`,
+                },
+              ],
               structuredContent: toStructured(result),
             };
           }
