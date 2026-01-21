@@ -8,6 +8,9 @@ and blocks them with a message instructing Claude to use ContextStream search in
 The hook only blocks tools when they appear to be used for code discovery/exploration.
 It allows Read when there's a specific file path that was likely found via search first.
 
+IMPORTANT: Files/directories matching .contextstream/ignore patterns are ALLOWED through
+because they won't be indexed in ContextStream anyway.
+
 Install this hook via Claude Code settings:
 {
   "hooks": {
@@ -27,9 +30,115 @@ Install this hook via Claude Code settings:
 import json
 import sys
 import os
+import fnmatch
+from pathlib import Path
+from typing import Optional, List
 
 # Configuration: Set to False to disable blocking (useful for debugging)
 BLOCKING_ENABLED = os.environ.get("CONTEXTSTREAM_HOOK_ENABLED", "true").lower() == "true"
+
+# Default ignore patterns (same as mcp-server/src/ignore.ts)
+DEFAULT_IGNORE_PATTERNS = [
+    # Version control
+    ".git/", ".svn/", ".hg/",
+    # Package managers / dependencies
+    "node_modules/", "vendor/", ".pnpm/",
+    # Build outputs
+    "target/", "dist/", "build/", "out/", ".next/", ".nuxt/",
+    # Python
+    "__pycache__/", ".pytest_cache/", ".mypy_cache/", "venv/", ".venv/", "env/", ".env/",
+    # IDE
+    ".idea/", ".vscode/", ".vs/",
+    # Coverage
+    "coverage/", ".coverage/",
+    # Lock files
+    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock",
+    "poetry.lock", "Gemfile.lock", "composer.lock",
+    # OS files
+    ".DS_Store", "Thumbs.db",
+]
+
+
+def find_project_root(start_path: str) -> Optional[str]:
+    """Find project root by looking for .contextstream directory or .git"""
+    current = Path(start_path).resolve()
+
+    # If start_path is a file, start from its parent
+    if current.is_file():
+        current = current.parent
+
+    while current != current.parent:
+        # Check for .contextstream directory (our marker)
+        if (current / ".contextstream").is_dir():
+            return str(current)
+        # Fall back to .git
+        if (current / ".git").exists():
+            return str(current)
+        current = current.parent
+
+    return None
+
+
+def load_ignore_patterns(project_root: str) -> List[str]:
+    """Load ignore patterns from .contextstream/ignore file"""
+    patterns = list(DEFAULT_IGNORE_PATTERNS)
+
+    ignore_file = Path(project_root) / ".contextstream" / "ignore"
+    if ignore_file.exists():
+        try:
+            content = ignore_file.read_text()
+            for line in content.splitlines():
+                line = line.strip()
+                # Skip empty lines and comments
+                if line and not line.startswith("#"):
+                    patterns.append(line)
+        except Exception:
+            pass  # If we can't read the file, just use defaults
+
+    return patterns
+
+
+def is_path_ignored(path: str, patterns: List[str], project_root: str) -> bool:
+    """Check if a path matches any ignore pattern using gitignore-like matching"""
+    # Make path relative to project root
+    try:
+        abs_path = Path(path).resolve()
+        rel_path = abs_path.relative_to(project_root)
+        path_str = str(rel_path)
+    except (ValueError, TypeError):
+        # Path is not under project root, or invalid
+        path_str = path
+
+    # Normalize path separators
+    path_str = path_str.replace("\\", "/")
+
+    for pattern in patterns:
+        pattern = pattern.replace("\\", "/")
+
+        # Handle directory patterns (ending with /)
+        if pattern.endswith("/"):
+            dir_pattern = pattern.rstrip("/")
+            # Check if any component of the path matches
+            parts = path_str.split("/")
+            if dir_pattern in parts:
+                return True
+            # Also check if path starts with pattern
+            if path_str.startswith(dir_pattern + "/"):
+                return True
+        else:
+            # File pattern - check exact match or fnmatch
+            if fnmatch.fnmatch(path_str, pattern):
+                return True
+            if fnmatch.fnmatch(os.path.basename(path_str), pattern):
+                return True
+            # Check with ** for recursive matching
+            if "**" in pattern:
+                # Convert gitignore ** to fnmatch pattern
+                fn_pattern = pattern.replace("**", "*")
+                if fnmatch.fnmatch(path_str, fn_pattern):
+                    return True
+
+    return False
 
 # File extensions that indicate code/source files (for discovery detection)
 CODE_EXTENSIONS = {
@@ -162,6 +271,18 @@ def is_discovery_search(tool_input: dict) -> bool:
     return False
 
 
+def get_target_path(tool_name: str, tool_input: dict) -> Optional[str]:
+    """Extract the target path from a tool invocation"""
+    if tool_name == "Glob":
+        # Glob uses pattern, but we need the path being searched
+        return tool_input.get("path", os.getcwd())
+    elif tool_name == "Grep":
+        return tool_input.get("path", os.getcwd())
+    elif tool_name == "Read":
+        return tool_input.get("file_path", "")
+    return None
+
+
 def main():
     if not BLOCKING_ENABLED:
         sys.exit(0)  # Hook disabled, allow all
@@ -173,6 +294,17 @@ def main():
 
     tool_name = input_data.get("tool_name", "")
     tool_input = input_data.get("tool_input", {})
+
+    # Check if the target path is in an ignored location
+    # If so, allow the local tool (don't redirect to ContextStream)
+    target_path = get_target_path(tool_name, tool_input)
+    if target_path:
+        project_root = find_project_root(target_path)
+        if project_root:
+            patterns = load_ignore_patterns(project_root)
+            if is_path_ignored(target_path, patterns, project_root):
+                # Path is ignored - allow local tool since it won't be in ContextStream
+                sys.exit(0)
 
     # Handle different tools
     if tool_name == "Glob":

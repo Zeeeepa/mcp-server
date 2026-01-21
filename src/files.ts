@@ -4,6 +4,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { loadIgnorePatterns, IgnoreInstance } from "./ignore.js";
 
 export interface FileToIngest {
   path: string;
@@ -141,11 +142,15 @@ export async function readFilesFromDirectory(
   options: {
     maxFiles?: number;
     maxFileSize?: number;
+    ignoreInstance?: IgnoreInstance;
   } = {}
 ): Promise<FileToIngest[]> {
   const maxFiles = options.maxFiles ?? MAX_FILES_PER_BATCH;
   const maxFileSize = options.maxFileSize ?? MAX_FILE_SIZE;
   const files: FileToIngest[] = [];
+
+  // Load ignore patterns (uses .contextstream/ignore + defaults)
+  const ig = options.ignoreInstance ?? (await loadIgnorePatterns(rootPath));
 
   async function walkDir(dir: string, relativePath: string = ""): Promise<void> {
     if (files.length >= maxFiles) return;
@@ -164,12 +169,15 @@ export async function readFilesFromDirectory(
       const relPath = path.join(relativePath, entry.name);
 
       if (entry.isDirectory()) {
-        // Skip ignored directories
+        // Skip ignored directories (check both hardcoded and .contextstream/ignore)
         if (IGNORE_DIRS.has(entry.name)) continue;
+        // Check .contextstream/ignore patterns (add trailing slash for directory matching)
+        if (ig.ignores(relPath + "/")) continue;
         await walkDir(fullPath, relPath);
       } else if (entry.isFile()) {
-        // Skip ignored files
+        // Skip ignored files (check both hardcoded and .contextstream/ignore)
         if (IGNORE_FILES.has(entry.name)) continue;
+        if (ig.ignores(relPath)) continue;
 
         // Check extension
         const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
@@ -215,13 +223,18 @@ export async function* readAllFilesInBatches(
     maxBatchBytes?: number;
     largeFileThreshold?: number;
     maxFilesPerBatch?: number;
+    batchSize?: number; // Alias for maxFilesPerBatch
     maxFileSize?: number;
+    ignoreInstance?: IgnoreInstance;
   } = {}
 ): AsyncGenerator<FileToIngest[], void, unknown> {
   const maxBatchBytes = options.maxBatchBytes ?? MAX_BATCH_BYTES;
   const largeFileThreshold = options.largeFileThreshold ?? LARGE_FILE_THRESHOLD;
-  const maxFilesPerBatch = options.maxFilesPerBatch ?? MAX_FILES_PER_BATCH;
+  const maxFilesPerBatch = options.maxFilesPerBatch ?? options.batchSize ?? MAX_FILES_PER_BATCH;
   const maxFileSize = options.maxFileSize ?? MAX_FILE_SIZE;
+
+  // Load ignore patterns (uses .contextstream/ignore + defaults)
+  const ig = options.ignoreInstance ?? (await loadIgnorePatterns(rootPath));
 
   let batch: FileWithSize[] = [];
   let currentBatchBytes = 0;
@@ -243,9 +256,12 @@ export async function* readAllFilesInBatches(
 
       if (entry.isDirectory()) {
         if (IGNORE_DIRS.has(entry.name)) continue;
+        // Check .contextstream/ignore patterns
+        if (ig.ignores(relPath + "/")) continue;
         yield* walkDir(fullPath, relPath);
       } else if (entry.isFile()) {
         if (IGNORE_FILES.has(entry.name)) continue;
+        if (ig.ignores(relPath)) continue;
 
         const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
         if (!CODE_EXTENSIONS.has(ext)) continue;
@@ -312,14 +328,19 @@ export async function* readChangedFilesInBatches(
     maxBatchBytes?: number;
     largeFileThreshold?: number;
     maxFilesPerBatch?: number;
+    batchSize?: number; // Alias for maxFilesPerBatch
     maxFileSize?: number;
+    ignoreInstance?: IgnoreInstance;
   } = {}
 ): AsyncGenerator<FileToIngest[], void, unknown> {
   const maxBatchBytes = options.maxBatchBytes ?? MAX_BATCH_BYTES;
   const largeFileThreshold = options.largeFileThreshold ?? LARGE_FILE_THRESHOLD;
-  const maxFilesPerBatch = options.maxFilesPerBatch ?? MAX_FILES_PER_BATCH;
+  const maxFilesPerBatch = options.maxFilesPerBatch ?? options.batchSize ?? MAX_FILES_PER_BATCH;
   const maxFileSize = options.maxFileSize ?? MAX_FILE_SIZE;
   const sinceMs = sinceTimestamp.getTime();
+
+  // Load ignore patterns (uses .contextstream/ignore + defaults)
+  const ig = options.ignoreInstance ?? (await loadIgnorePatterns(rootPath));
 
   let batch: FileWithSize[] = [];
   let currentBatchBytes = 0;
@@ -343,9 +364,12 @@ export async function* readChangedFilesInBatches(
 
       if (entry.isDirectory()) {
         if (IGNORE_DIRS.has(entry.name)) continue;
+        // Check .contextstream/ignore patterns
+        if (ig.ignores(relPath + "/")) continue;
         yield* walkDir(fullPath, relPath);
       } else if (entry.isFile()) {
         if (IGNORE_FILES.has(entry.name)) continue;
+        if (ig.ignores(relPath)) continue;
 
         const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
         if (!CODE_EXTENSIONS.has(ext)) continue;
@@ -419,14 +443,19 @@ export async function countIndexableFiles(
   options: {
     maxFiles?: number; // Stop counting after this many (default 1 for quick check)
     maxFileSize?: number;
+    ignoreInstance?: IgnoreInstance;
   } = {}
 ): Promise<{ count: number; stopped: boolean }> {
   const maxFiles = options.maxFiles ?? 1;
   const maxFileSize = options.maxFileSize ?? MAX_FILE_SIZE;
+
+  // Load ignore patterns (uses .contextstream/ignore + defaults)
+  const ig = options.ignoreInstance ?? (await loadIgnorePatterns(rootPath));
+
   let count = 0;
   let stopped = false;
 
-  async function walkDir(dir: string): Promise<void> {
+  async function walkDir(dir: string, relativePath: string = ""): Promise<void> {
     if (count >= maxFiles) {
       stopped = true;
       return;
@@ -446,12 +475,16 @@ export async function countIndexableFiles(
       }
 
       const fullPath = path.join(dir, entry.name);
+      const relPath = path.join(relativePath, entry.name);
 
       if (entry.isDirectory()) {
         if (IGNORE_DIRS.has(entry.name)) continue;
-        await walkDir(fullPath);
+        // Check .contextstream/ignore patterns
+        if (ig.ignores(relPath + "/")) continue;
+        await walkDir(fullPath, relPath);
       } else if (entry.isFile()) {
         if (IGNORE_FILES.has(entry.name)) continue;
+        if (ig.ignores(relPath)) continue;
 
         const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
         if (!CODE_EXTENSIONS.has(ext)) continue;
