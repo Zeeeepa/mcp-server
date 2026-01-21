@@ -1418,6 +1418,109 @@ export async function runSetupWizard(args: string[]): Promise<void> {
       }
     }
 
+    // Indexing exclusions (.contextstream/ignore)
+    console.log("\n┌─────────────────────────────────────────────────────────────────┐");
+    console.log("│  Code Privacy & Indexing                                        │");
+    console.log("└─────────────────────────────────────────────────────────────────┘");
+    console.log("");
+    console.log("  Your code is protected:");
+    console.log("    ✓ Encrypted in transit (TLS 1.3) and at rest (AES-256)");
+    console.log("    ✓ Isolated per workspace — no cross-tenant access");
+    console.log("    ✓ You can delete your data anytime");
+    console.log("");
+    console.log("  As an additional measure, you can exclude specific files from indexing");
+    console.log("  using .contextstream/ignore (gitignore syntax). Already excluded:");
+    console.log("    • node_modules, vendor, .git, build outputs, lock files");
+    console.log("");
+    console.log("  Optional: Add patterns for extra-sensitive files like:");
+    console.log("    • customer-data/ — client-specific data");
+    console.log("    • **/*.pem, **/*.key — private keys & certificates");
+    console.log("    • src/legacy/ — code you don't need indexed");
+    console.log("");
+    const createIgnoreFile = normalizeInput(
+      await rl.question("Create a sample .contextstream/ignore file? [y/N]: ")
+    ).toLowerCase();
+
+    if (createIgnoreFile === "y" || createIgnoreFile === "yes") {
+      const ignoreContent = `# .contextstream/ignore - Additional exclusions from ContextStream indexing
+# Uses gitignore syntax: https://git-scm.com/docs/gitignore
+#
+# Note: Your code is already protected with encryption (TLS 1.3 + AES-256)
+# and workspace isolation. This file is for extra-sensitive paths you prefer
+# to keep completely off the index.
+
+# Customer/sensitive data
+**/customer-data/
+**/secrets/
+**/*.pem
+**/*.key
+
+# Large generated files
+**/generated/
+**/*.min.js
+**/*.min.css
+
+# Test fixtures with sensitive data
+**/fixtures/production/
+**/test-data/real/
+
+# Vendor code you don't want indexed
+**/third-party/
+**/external-libs/
+
+# Specific paths in your project (uncomment as needed)
+# src/legacy/
+# docs/internal/
+`;
+
+      // Ask where to create the ignore file
+      console.log("\nWhere to create .contextstream/ignore?");
+      console.log(`  1) Current folder (${process.cwd()})`);
+      console.log("  2) Home folder (applies globally)");
+      console.log("  3) I'll add it to specific projects later");
+      const ignoreLocation = normalizeInput(await rl.question("Choose [1/2/3] (default 1): ")) || "1";
+
+      if (ignoreLocation === "1" || ignoreLocation === "2") {
+        const baseDir = ignoreLocation === "1" ? process.cwd() : homedir();
+        const ignoreDir = path.join(baseDir, ".contextstream");
+        const ignorePath = path.join(ignoreDir, "ignore");
+
+        if (dryRun) {
+          writeActions.push({ kind: "rules", target: ignorePath, status: "dry-run" });
+          console.log(`- Would create ${ignorePath}`);
+        } else {
+          try {
+            await fs.mkdir(ignoreDir, { recursive: true });
+            const exists = await fileExists(ignorePath);
+            if (exists) {
+              const overwrite = normalizeInput(
+                await rl.question(`${ignorePath} already exists. Overwrite? [y/N]: `)
+              ).toLowerCase();
+              if (overwrite !== "y" && overwrite !== "yes") {
+                console.log("- Skipped (file exists)");
+              } else {
+                await fs.writeFile(ignorePath, ignoreContent, "utf-8");
+                writeActions.push({ kind: "rules", target: ignorePath, status: "updated" });
+                console.log(`- Updated ${ignorePath}`);
+              }
+            } else {
+              await fs.writeFile(ignorePath, ignoreContent, "utf-8");
+              writeActions.push({ kind: "rules", target: ignorePath, status: "created" });
+              console.log(`- Created ${ignorePath}`);
+            }
+          } catch (err: any) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.log(`- Failed to create ignore file: ${message}`);
+          }
+        }
+      } else {
+        console.log("- Skipped. Add .contextstream/ignore to your projects as needed.");
+      }
+    } else {
+      console.log("- Using default exclusions only.");
+      console.log("  Tip: Create .contextstream/ignore in any project to customize.");
+    }
+
     // Global rules
     if (scope === "global" || scope === "both") {
       console.log("\nInstalling global rules...");

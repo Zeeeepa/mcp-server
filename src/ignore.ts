@@ -201,8 +201,12 @@ export function clearIgnoreCache(projectRoot?: string): void {
  * Create a sample .contextstream/ignore file with common patterns
  */
 export function getSampleIgnoreContent(): string {
-  return `# .contextstream/ignore - Files to exclude from ContextStream indexing
+  return `# .contextstream/ignore - Additional exclusions from ContextStream indexing
 # Uses gitignore syntax: https://git-scm.com/docs/gitignore
+#
+# Note: Your code is already protected with encryption (TLS 1.3 + AES-256)
+# and workspace isolation. This file is for extra-sensitive paths you prefer
+# to keep completely off the index.
 
 # Customer/sensitive data
 **/customer-data/
