@@ -4715,6 +4715,12 @@ This does semantic search on the first message. You only need context_smart on s
           .describe(
             "If true, allow session_init to return connected even if no workspace is resolved (workspace-level tools may not work)."
           ),
+        skip_project_creation: z
+          .boolean()
+          .optional()
+          .describe(
+            "If true, skip automatic project creation/matching. Use for parent folders containing multiple projects where you want workspace-level context but no project-specific context."
+          ),
       }),
     },
     async (input) => {

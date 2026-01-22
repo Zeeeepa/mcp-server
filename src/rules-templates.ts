@@ -473,6 +473,16 @@ When user asks for a plan, use ContextStream (not EnterPlanMode):
 1. \`session(action="capture_plan", title="...", steps=[...])\`
 2. \`memory(action="create_task", title="...", plan_id="<id>")\`
 
+### Workspace-Only Mode (Multi-Project Folders)
+
+If working in a parent folder containing multiple projects:
+\`\`\`
+session_init(folder_path="...", skip_project_creation=true)
+\`\`\`
+
+This enables workspace-level memory and context without project-specific indexing.
+Use for monorepos or folders with multiple independent projects.
+
 Full docs: https://contextstream.io/docs/mcp/tools
 `.trim();
 

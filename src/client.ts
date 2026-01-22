@@ -105,6 +105,71 @@ interface IngestRecommendation {
   command?: string;
 }
 
+// Project markers that indicate a directory is a standalone project
+const PROJECT_MARKERS = [
+  ".git",
+  "package.json",
+  "Cargo.toml",
+  "pyproject.toml",
+  "go.mod",
+  "pom.xml",
+  "build.gradle",
+  "Gemfile",
+  "composer.json",
+  ".contextstream",
+];
+
+/**
+ * Detect if a folder is a multi-project parent (e.g., ~/dev/projects)
+ * by checking if it contains multiple subdirectories with project markers.
+ *
+ * Returns true if:
+ * - 2+ immediate subdirectories contain project markers
+ * - AND the root folder itself doesn't have a .git (if it does, it's a monorepo)
+ */
+function isMultiProjectFolder(folderPath: string): { isMultiProject: boolean; projectCount: number; projectNames: string[] } {
+  try {
+    const fs = require("fs");
+    const pathModule = require("path");
+
+    // Check if root has .git - if so, it's probably a monorepo, not multi-project
+    const rootHasGit = fs.existsSync(pathModule.join(folderPath, ".git"));
+
+    // Get immediate subdirectories
+    const entries = fs.readdirSync(folderPath, { withFileTypes: true });
+    const subdirs = entries.filter((e: any) =>
+      e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules"
+    );
+
+    // Count subdirectories with project markers
+    const projectSubdirs: string[] = [];
+    for (const subdir of subdirs) {
+      const subdirPath = pathModule.join(folderPath, subdir.name);
+      for (const marker of PROJECT_MARKERS) {
+        if (fs.existsSync(pathModule.join(subdirPath, marker))) {
+          projectSubdirs.push(subdir.name);
+          break;
+        }
+      }
+    }
+
+    // It's a multi-project folder if:
+    // - 1+ subdirectories have project markers AND root doesn't have .git
+    // - OR root has .git but 2+ subdirectories are projects (monorepo with nested projects)
+    const isMultiProject = projectSubdirs.length >= 1 && (!rootHasGit || projectSubdirs.length >= 2);
+
+    return {
+      isMultiProject,
+      projectCount: projectSubdirs.length,
+      projectNames: projectSubdirs,
+    };
+  } catch {
+    // If we can't read the directory, assume it's not multi-project
+    return { isMultiProject: false, projectCount: 0, projectNames: [] };
+  }
+}
+
+
 export class ContextStreamClient {
   private sessionStartTime?: number;
   private sessionProjectId?: string;
@@ -112,7 +177,7 @@ export class ContextStreamClient {
   private lastRefreshCheckTime?: number;
   private indexRefreshInProgress = false;
 
-  constructor(private config: Config) {}
+  constructor(private config: Config) { }
 
   /**
    * Update the client's default workspace/project IDs at runtime.
@@ -370,13 +435,13 @@ export class ContextStreamClient {
         filters: body.workspace_id
           ? {}
           : {
-              file_types: [],
-              languages: [],
-              file_paths: [],
-              exclude_paths: [],
-              content_types: [],
-              tags: [],
-            },
+            file_types: [],
+            languages: [],
+            file_paths: [],
+            exclude_paths: [],
+            content_types: [],
+            tags: [],
+          },
       },
     });
   }
@@ -400,13 +465,13 @@ export class ContextStreamClient {
         filters: body.workspace_id
           ? {}
           : {
-              file_types: [],
-              languages: [],
-              file_paths: [],
-              exclude_paths: [],
-              content_types: [],
-              tags: [],
-            },
+            file_types: [],
+            languages: [],
+            file_paths: [],
+            exclude_paths: [],
+            content_types: [],
+            tags: [],
+          },
       },
     });
   }
@@ -430,13 +495,13 @@ export class ContextStreamClient {
         filters: body.workspace_id
           ? {}
           : {
-              file_types: [],
-              languages: [],
-              file_paths: [],
-              exclude_paths: [],
-              content_types: [],
-              tags: [],
-            },
+            file_types: [],
+            languages: [],
+            file_paths: [],
+            exclude_paths: [],
+            content_types: [],
+            tags: [],
+          },
       },
     });
   }
@@ -460,13 +525,13 @@ export class ContextStreamClient {
         filters: body.workspace_id
           ? {}
           : {
-              file_types: [],
-              languages: [],
-              file_paths: [],
-              exclude_paths: [],
-              content_types: [],
-              tags: [],
-            },
+            file_types: [],
+            languages: [],
+            file_paths: [],
+            exclude_paths: [],
+            content_types: [],
+            tags: [],
+          },
       },
     });
   }
@@ -495,13 +560,13 @@ export class ContextStreamClient {
         filters: body.workspace_id
           ? {}
           : {
-              file_types: [],
-              languages: [],
-              file_paths: [],
-              exclude_paths: [],
-              content_types: [],
-              tags: [],
-            },
+            file_types: [],
+            languages: [],
+            file_paths: [],
+            exclude_paths: [],
+            content_types: [],
+            tags: [],
+          },
       },
     });
   }
@@ -529,13 +594,13 @@ export class ContextStreamClient {
         filters: body.workspace_id
           ? {}
           : {
-              file_types: [],
-              languages: [],
-              file_paths: [],
-              exclude_paths: [],
-              content_types: [],
-              tags: [],
-            },
+            file_types: [],
+            languages: [],
+            file_paths: [],
+            exclude_paths: [],
+            content_types: [],
+            tags: [],
+          },
       },
     });
   }
@@ -1418,6 +1483,12 @@ export class ContextStreamClient {
        * a workspace, so default behavior is to prompt the user to select/create one.
        */
       allow_no_workspace?: boolean;
+      /**
+       * If true, skip automatic project creation/matching.
+       * Useful for parent folders containing multiple projects where you want
+       * workspace-level context but no project-specific context.
+       */
+      skip_project_creation?: boolean;
     },
     ideRoots: string[] = []
   ) {
@@ -1624,8 +1695,34 @@ export class ContextStreamClient {
 
     // ========================================
     // STEP 2: Project Discovery
+    // (skipped when skip_project_creation=true OR auto-detected multi-project folder)
     // ========================================
-    if (!projectId && workspaceId && rootPath && params.auto_index !== false) {
+
+    // Auto-detect multi-project folder (e.g., ~/dev/maker containing contextstream/, mcp-server/, etc.)
+    let autoDetectedMultiProject = false;
+    if (!params.skip_project_creation && !projectId && rootPath) {
+      const detection = isMultiProjectFolder(rootPath);
+      if (detection.isMultiProject) {
+        autoDetectedMultiProject = true;
+        context.workspace_only_mode = true;
+        context.auto_detected_multi_project = true;
+        context.detected_projects = detection.projectNames;
+        context.project_skipped_reason =
+          `Auto-detected ${detection.projectCount} projects in folder: ${detection.projectNames.slice(0, 5).join(", ")}${detection.projectCount > 5 ? "..." : ""}. Working at workspace level.`;
+        console.error(
+          `[ContextStream] Auto-detected multi-project folder with ${detection.projectCount} projects: ${detection.projectNames.slice(0, 5).join(", ")}`
+        );
+      }
+    }
+
+    if (params.skip_project_creation) {
+      // Explicit workspace-only mode: don't create/match a project
+      context.workspace_only_mode = true;
+      context.project_skipped_reason =
+        "skip_project_creation=true - working at workspace level for multi-project folder";
+    } else if (autoDetectedMultiProject) {
+      // Already handled above - workspace_only_mode is set
+    } else if (!projectId && workspaceId && rootPath && params.auto_index !== false) {
       const projectName = path.basename(rootPath) || "My Project";
 
       try {
@@ -2023,10 +2120,10 @@ export class ContextStreamClient {
       // 4: relevant context from semantic search
       params.context_hint
         ? this.memorySearch({
-            query: params.context_hint,
-            workspace_id: workspaceId,
-            limit: 5,
-          }).catch(() => null)
+          query: params.context_hint,
+          workspace_id: workspaceId,
+          limit: 5,
+        }).catch(() => null)
         : Promise.resolve(null),
       // 5: high-priority lessons
       this.getHighPriorityLessons({
@@ -2136,20 +2233,20 @@ export class ContextStreamClient {
     project_id?: string;
     session_id?: string;
     event_type:
-      | "conversation"
-      | "decision"
-      | "insight"
-      | "preference"
-      | "note"
-      | "implementation"
-      | "task"
-      | "bug"
-      | "feature"
-      | "plan"
-      | "correction"
-      | "lesson"
-      | "warning"
-      | "frustration";
+    | "conversation"
+    | "decision"
+    | "insight"
+    | "preference"
+    | "note"
+    | "implementation"
+    | "task"
+    | "bug"
+    | "feature"
+    | "plan"
+    | "correction"
+    | "lesson"
+    | "warning"
+    | "frustration";
     title: string;
     content: string;
     tags?: string[];
