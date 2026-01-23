@@ -16,7 +16,13 @@ import {
 import { VERSION, getUpdateNotice } from "./version.js";
 import { generateToolCatalog, getCoreToolsHint, type CatalogFormat } from "./tool-catalog.js";
 import { getAuthOverride, runWithAuthOverride, type AuthOverride } from "./auth-context.js";
-import { installClaudeCodeHooks, markProjectIndexed } from "./hooks-config.js";
+import {
+  installClaudeCodeHooks,
+  markProjectIndexed,
+  installEditorHooks,
+  installAllEditorHooks,
+  type SupportedEditor,
+} from "./hooks-config.js";
 import { trackToolTokenSavings, type TokenSavingsToolType } from "./token-savings.js";
 
 type StructuredContent = { [x: string]: unknown } | undefined;
@@ -1141,6 +1147,11 @@ const ALL_INTEGRATION_TOOLS = new Set<string>([
 // Environment variable to control integration tool auto-hiding
 // CONTEXTSTREAM_AUTO_HIDE_INTEGRATIONS=true (default) | false
 const AUTO_HIDE_INTEGRATIONS = process.env.CONTEXTSTREAM_AUTO_HIDE_INTEGRATIONS !== "false";
+
+// Environment variable to control automatic context restoration on session_init
+// CONTEXTSTREAM_RESTORE_CONTEXT=true (default) | false
+// When true, session_init always attempts to restore from recent snapshots
+const RESTORE_CONTEXT_DEFAULT = process.env.CONTEXTSTREAM_RESTORE_CONTEXT !== "false";
 
 // ============================================
 // CLIENT DETECTION (Strategy 3)
@@ -4771,7 +4782,7 @@ This does semantic search on the first message. You only need context_smart on s
           .boolean()
           .optional()
           .describe(
-            "Set to true when resuming after conversation compaction. This prioritizes session_snapshot restoration and recent decisions."
+            "Controls context restoration from recent snapshots. Defaults to true (always restores). Set to false to skip restoration. Can also be controlled via CONTEXTSTREAM_RESTORE_CONTEXT environment variable."
           ),
       }),
     },
@@ -4801,8 +4812,11 @@ This does semantic search on the first message. You only need context_smart on s
       // Add compact tool reference to help AI know available tools
       result.tools_hint = getCoreToolsHint();
 
-      // Handle post-compaction scenario - prioritize session_snapshot restoration
-      if (input.is_post_compact) {
+      // Handle context restoration - always try to restore from recent snapshots by default
+      // Can be disabled via CONTEXTSTREAM_RESTORE_CONTEXT=false or input.is_post_compact=false
+      const shouldRestoreContext = input.is_post_compact ?? RESTORE_CONTEXT_DEFAULT;
+      if (shouldRestoreContext) {
+        (result as any).is_post_compact = true;
         const workspaceIdForRestore =
           typeof result.workspace_id === "string" ? result.workspace_id : undefined;
         const projectIdForRestore =
@@ -6411,38 +6425,81 @@ Supported editors: ${getAvailableEditors().join(", ")}`,
           ? "Apply rules globally too? Re-run with apply_global: true."
           : "No global rule locations are known for these editors.";
 
-      // Install Claude Code hooks by default when claude is in editors (unless explicitly disabled)
-      let hooksResults: Array<{ file: string; status: string }> | undefined;
+      // Install hooks for editors that support them (Claude, Cline, Roo, Kilo)
+      let hooksResults: Array<{ editor?: string; file: string; status: string }> | undefined;
       let hooksPrompt: string | undefined;
-      const hasClaude = editors.includes("claude");
-      const shouldInstallHooks = hasClaude && input.install_hooks !== false;
+      const editorHookMap: Record<string, SupportedEditor> = {
+        claude: "claude",
+        cline: "cline",
+        roo: "roo",
+        kilo: "kilo",
+        cursor: "cursor",
+        windsurf: "windsurf",
+      };
+      const hookSupportedEditors = editors.filter((e) => e in editorHookMap) as SupportedEditor[];
+      const shouldInstallHooks = hookSupportedEditors.length > 0 && input.install_hooks !== false;
 
       if (shouldInstallHooks) {
         try {
           if (input.dry_run) {
-            hooksResults = [
-              { file: "~/.claude/hooks/contextstream-redirect.py", status: "dry run - would create" },
-              { file: "~/.claude/hooks/contextstream-reminder.py", status: "dry run - would create" },
-              { file: "~/.claude/settings.json", status: "dry run - would update" },
-            ];
-            if (input.include_pre_compact) {
-              hooksResults.push({ file: "~/.claude/hooks/contextstream-precompact.py", status: "dry run - would create" });
+            hooksResults = [];
+            for (const editor of hookSupportedEditors) {
+              if (editor === "claude") {
+                hooksResults.push(
+                  { editor, file: "~/.claude/hooks/contextstream-redirect.py", status: "dry run - would create" },
+                  { editor, file: "~/.claude/hooks/contextstream-reminder.py", status: "dry run - would create" },
+                  { editor, file: "~/.claude/settings.json", status: "dry run - would update" }
+                );
+                if (input.include_pre_compact) {
+                  hooksResults.push({ editor, file: "~/.claude/hooks/contextstream-precompact.py", status: "dry run - would create" });
+                }
+              } else if (editor === "cline") {
+                hooksResults.push(
+                  { editor, file: "~/Documents/Cline/Rules/Hooks/PreToolUse", status: "dry run - would create" },
+                  { editor, file: "~/Documents/Cline/Rules/Hooks/UserPromptSubmit", status: "dry run - would create" }
+                );
+              } else if (editor === "roo") {
+                hooksResults.push(
+                  { editor, file: "~/.roo/hooks/PreToolUse", status: "dry run - would create" },
+                  { editor, file: "~/.roo/hooks/UserPromptSubmit", status: "dry run - would create" }
+                );
+              } else if (editor === "kilo") {
+                hooksResults.push(
+                  { editor, file: "~/.kilocode/hooks/PreToolUse", status: "dry run - would create" },
+                  { editor, file: "~/.kilocode/hooks/UserPromptSubmit", status: "dry run - would create" }
+                );
+              } else if (editor === "cursor") {
+                hooksResults.push(
+                  { editor, file: "~/.cursor/hooks/contextstream-pretooluse.py", status: "dry run - would create" },
+                  { editor, file: "~/.cursor/hooks/contextstream-beforesubmit.py", status: "dry run - would create" },
+                  { editor, file: "~/.cursor/hooks.json", status: "dry run - would update" }
+                );
+              } else if (editor === "windsurf") {
+                hooksResults.push(
+                  { editor, file: "~/.codeium/windsurf/hooks/contextstream-pretooluse.py", status: "dry run - would create" },
+                  { editor, file: "~/.codeium/windsurf/hooks/contextstream-reminder.py", status: "dry run - would create" },
+                  { editor, file: "~/.codeium/windsurf/hooks.json", status: "dry run - would update" }
+                );
+              }
             }
           } else {
-            const hookResult = await installClaudeCodeHooks({
-              scope: "user",
+            hooksResults = [];
+            const allHookResults = await installAllEditorHooks({
+              scope: "global",
+              editors: hookSupportedEditors,
               includePreCompact: input.include_pre_compact,
             });
-            hooksResults = [
-              ...hookResult.scripts.map((f) => ({ file: f, status: "created" })),
-              ...hookResult.settings.map((f) => ({ file: f, status: "updated" })),
-            ];
+            for (const result of allHookResults) {
+              for (const file of result.installed) {
+                hooksResults.push({ editor: result.editor, file, status: "created" });
+              }
+            }
           }
         } catch (err) {
           hooksResults = [{ file: "hooks", status: `error: ${(err as Error).message}` }];
         }
-      } else if (hasClaude && input.install_hooks === false) {
-        hooksPrompt = "Hooks skipped. Claude may use default tools instead of ContextStream search.";
+      } else if (hookSupportedEditors.length > 0 && input.install_hooks === false) {
+        hooksPrompt = "Hooks skipped. AI may use default tools instead of ContextStream search.";
       }
 
       const summary = {

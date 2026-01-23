@@ -17,7 +17,9 @@ import {
 } from "./credentials.js";
 import {
   installClaudeCodeHooks,
+  installEditorHooks,
   generateHooksDocumentation,
+  type SupportedEditor,
 } from "./hooks-config.js";
 
 type RuleMode = "minimal" | "full";
@@ -486,6 +488,7 @@ function buildContextStreamMcpServer(params: {
   toolset?: Toolset;
   contextPackEnabled?: boolean;
   showTiming?: boolean;
+  restoreContextEnabled?: boolean;
 }): McpServerJson {
   const env: Record<string, string> = {
     CONTEXTSTREAM_API_URL: params.apiUrl,
@@ -496,6 +499,10 @@ function buildContextStreamMcpServer(params: {
     env.CONTEXTSTREAM_PROGRESSIVE_MODE = "true";
   }
   env.CONTEXTSTREAM_CONTEXT_PACK = params.contextPackEnabled === false ? "false" : "true";
+  // Context restoration is enabled by default; only set env var if explicitly disabled
+  if (params.restoreContextEnabled === false) {
+    env.CONTEXTSTREAM_RESTORE_CONTEXT = "false";
+  }
   if (params.showTiming) {
     env.CONTEXTSTREAM_SHOW_TIMING = "true";
   }
@@ -528,6 +535,7 @@ function buildContextStreamVsCodeServer(params: {
   toolset?: Toolset;
   contextPackEnabled?: boolean;
   showTiming?: boolean;
+  restoreContextEnabled?: boolean;
 }): VsCodeServerJson {
   const env: Record<string, string> = {
     CONTEXTSTREAM_API_URL: params.apiUrl,
@@ -538,6 +546,10 @@ function buildContextStreamVsCodeServer(params: {
     env.CONTEXTSTREAM_PROGRESSIVE_MODE = "true";
   }
   env.CONTEXTSTREAM_CONTEXT_PACK = params.contextPackEnabled === false ? "false" : "true";
+  // Context restoration is enabled by default; only set env var if explicitly disabled
+  if (params.restoreContextEnabled === false) {
+    env.CONTEXTSTREAM_RESTORE_CONTEXT = "false";
+  }
   if (params.showTiming) {
     env.CONTEXTSTREAM_SHOW_TIMING = "true";
   }
@@ -663,7 +675,7 @@ function claudeDesktopConfigPath(): string | null {
 
 async function upsertCodexTomlConfig(
   filePath: string,
-  params: { apiUrl: string; apiKey: string; toolset?: Toolset; contextPackEnabled?: boolean; showTiming?: boolean }
+  params: { apiUrl: string; apiKey: string; toolset?: Toolset; contextPackEnabled?: boolean; showTiming?: boolean; restoreContextEnabled?: boolean }
 ): Promise<"created" | "updated" | "skipped"> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const exists = await fileExists(filePath);
@@ -676,6 +688,8 @@ async function upsertCodexTomlConfig(
   const toolsetLine =
     params.toolset === "router" ? `CONTEXTSTREAM_PROGRESSIVE_MODE = "true"\n` : "";
   const contextPackLine = `CONTEXTSTREAM_CONTEXT_PACK = "${params.contextPackEnabled === false ? "false" : "true"}"\n`;
+  // Context restoration is enabled by default; only set env var if explicitly disabled
+  const restoreContextLine = params.restoreContextEnabled === false ? `CONTEXTSTREAM_RESTORE_CONTEXT = "false"\n` : "";
   const showTimingLine = params.showTiming ? `CONTEXTSTREAM_SHOW_TIMING = "true"\n` : "";
   // Windows requires cmd /c wrapper to execute npx
   const commandLine = IS_WINDOWS
@@ -690,6 +704,7 @@ async function upsertCodexTomlConfig(
     `CONTEXTSTREAM_API_KEY = "${params.apiKey}"\n` +
     toolsetLine +
     contextPackLine +
+    restoreContextLine +
     showTimingLine;
 
   if (!exists) {
@@ -1160,6 +1175,15 @@ export async function runSetupWizard(args: string[]): Promise<void> {
     const showTiming =
       showTimingChoice.toLowerCase() === "y" || showTimingChoice.toLowerCase() === "yes";
 
+    console.log("\nAutomatic Context Restoration:");
+    console.log("  Automatically restore context from recent snapshots on every session_init.");
+    console.log("  This enables seamless continuation across conversations and after compaction.");
+    console.log("  Enabled by default; disable if you prefer explicit control.");
+    const restoreContextChoice = normalizeInput(await rl.question("Enable automatic context restoration? [Y/n]: "));
+    const restoreContextEnabled = !(
+      restoreContextChoice.toLowerCase() === "n" || restoreContextChoice.toLowerCase() === "no"
+    );
+
     const editors: EditorKey[] = [
       "codex",
       "claude",
@@ -1257,13 +1281,14 @@ export async function runSetupWizard(args: string[]): Promise<void> {
 
     // Build MCP server configs with selected toolset
     // v0.4.x: consolidated (~11 tools) is default, router (~2 tools) uses PROGRESSIVE_MODE
-    const mcpServer = buildContextStreamMcpServer({ apiUrl, apiKey, toolset, contextPackEnabled, showTiming });
+    const mcpServer = buildContextStreamMcpServer({ apiUrl, apiKey, toolset, contextPackEnabled, showTiming, restoreContextEnabled });
     const mcpServerClaude = buildContextStreamMcpServer({
       apiUrl,
       apiKey,
       toolset,
       contextPackEnabled,
       showTiming,
+      restoreContextEnabled,
     });
     const vsCodeServer = buildContextStreamVsCodeServer({
       apiUrl,
@@ -1271,6 +1296,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
       toolset,
       contextPackEnabled,
       showTiming,
+      restoreContextEnabled,
     });
 
     // Global MCP config
@@ -1295,6 +1321,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
               toolset,
               contextPackEnabled,
               showTiming,
+              restoreContextEnabled,
             });
             writeActions.push({ kind: "mcp-config", target: filePath, status });
             console.log(`- ${EDITOR_LABELS[editor]}: ${status} ${filePath}`);
@@ -1386,55 +1413,74 @@ export async function runSetupWizard(args: string[]): Promise<void> {
       }
     }
 
-    // Claude Code hooks (optional but highly recommended)
-    if (configuredEditors.includes("claude")) {
+    // Editor hooks (optional but highly recommended)
+    // Map editors to their hook support
+    const HOOKS_SUPPORTED_EDITORS: Record<EditorKey, SupportedEditor | null> = {
+      claude: "claude",
+      cursor: "cursor",
+      windsurf: "windsurf",
+      cline: "cline",
+      roo: "roo",
+      kilo: "kilo",
+      codex: null, // No hooks API
+      aider: null, // No hooks API
+      antigravity: null, // No hooks API
+    };
+
+    const hookEligibleEditors = configuredEditors.filter(
+      (e) => HOOKS_SUPPORTED_EDITORS[e] !== null
+    );
+
+    if (hookEligibleEditors.length > 0) {
       console.log("\n┌─────────────────────────────────────────────────────────────────┐");
-      console.log("│  Claude Code Hooks (Recommended)                                │");
+      console.log("│  AI Editor Hooks (Recommended)                                  │");
       console.log("└─────────────────────────────────────────────────────────────────┘");
       console.log("");
-      console.log("  Problem: Claude Code often ignores CLAUDE.md instructions and uses");
-      console.log("  its default tools (Grep/Glob/Search) instead of ContextStream search.");
-      console.log("  This happens because instructions decay over long conversations.");
+      console.log("  Problem: AI editors often use their default tools (Grep/Glob/Search)");
+      console.log("  instead of ContextStream smart search. Instructions decay over long chats.");
       console.log("");
       console.log("  Solution: Install hooks that:");
-      console.log("  ✓ Block default search tools (Grep/Glob/Search) → redirect to ContextStream");
-      console.log("  ✓ Block built-in plan mode → redirect to ContextStream plans (persistent)");
-      console.log("  ✓ Inject reminders on every message to keep rules in context");
-      console.log("  ✓ Result: Faster searches, persistent plans across sessions");
+      console.log("  ✓ Use ContextStream (indexed, faster) with default tool use");
+      console.log("  ✓ Use ContextStream plans (persistent) with default tool use");
+      console.log("  ✓ Inject reminders to keep rules in context");
+      console.log("");
+      console.log(`  Hooks available for: ${hookEligibleEditors.map(e => EDITOR_LABELS[e]).join(", ")}`);
       console.log("");
       console.log("  You can disable hooks anytime with CONTEXTSTREAM_HOOK_ENABLED=false");
       console.log("");
       const installHooks = normalizeInput(
-        await rl.question("Install Claude Code hooks? [Y/n] (recommended): ")
+        await rl.question("Install editor hooks? [Y/n] (recommended): ")
       ).toLowerCase();
 
       if (installHooks !== "n" && installHooks !== "no") {
-        try {
-          if (dryRun) {
-            console.log("- Would install hooks to ~/.claude/hooks/");
-            console.log("- Would update ~/.claude/settings.json");
-            writeActions.push({ kind: "mcp-config", target: path.join(homedir(), ".claude", "hooks", "contextstream-redirect.py"), status: "dry-run" });
-            writeActions.push({ kind: "mcp-config", target: path.join(homedir(), ".claude", "hooks", "contextstream-reminder.py"), status: "dry-run" });
-            writeActions.push({ kind: "mcp-config", target: path.join(homedir(), ".claude", "settings.json"), status: "dry-run" });
-          } else {
-            const result = await installClaudeCodeHooks({ scope: "user" });
-            result.scripts.forEach(script => {
-              writeActions.push({ kind: "mcp-config", target: script, status: "created" });
-              console.log(`- Created hook: ${script}`);
+        for (const editor of hookEligibleEditors) {
+          const hookEditor = HOOKS_SUPPORTED_EDITORS[editor];
+          if (!hookEditor) continue;
+
+          try {
+            if (dryRun) {
+              console.log(`- ${EDITOR_LABELS[editor]}: would install hooks`);
+              continue;
+            }
+
+            const result = await installEditorHooks({
+              editor: hookEditor,
+              scope: "global",
             });
-            result.settings.forEach(settings => {
-              writeActions.push({ kind: "mcp-config", target: settings, status: "updated" });
-              console.log(`- Updated settings: ${settings}`);
-            });
+
+            for (const script of result.installed) {
+              writeActions.push({ kind: "hooks", target: script, status: "created" });
+              console.log(`- ${EDITOR_LABELS[editor]}: installed ${path.basename(script)}`);
+            }
+          } catch (err: any) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.log(`- ${EDITOR_LABELS[editor]}: failed to install hooks: ${message}`);
           }
-          console.log("  Hooks installed. Disable with CONTEXTSTREAM_HOOK_ENABLED=false");
-        } catch (err: any) {
-          const message = err instanceof Error ? err.message : String(err);
-          console.log(`- Failed to install hooks: ${message}`);
         }
+        console.log("  Hooks installed. Disable with CONTEXTSTREAM_HOOK_ENABLED=false");
       } else {
         console.log("- Skipped hooks installation.");
-        console.log("  Note: Without hooks, Claude may still use default tools instead of ContextStream.");
+        console.log("  Note: Without hooks, AI may still use default tools instead of ContextStream.");
       }
     }
 

@@ -804,3 +804,1062 @@ export async function unmarkProjectIndexed(projectPath: string): Promise<void> {
 
   await writeIndexStatus(status);
 }
+
+// =============================================================================
+// CLINE HOOKS SUPPORT
+// =============================================================================
+
+/**
+ * Cline PreToolUse hook script.
+ * Uses JSON output format with cancel/contextModification fields.
+ */
+export const CLINE_PRETOOLUSE_HOOK_SCRIPT = `#!/usr/bin/env python3
+"""
+ContextStream PreToolUse Hook for Cline
+Blocks discovery tools and redirects to ContextStream search.
+
+Cline hooks use JSON output format:
+{
+  "cancel": true/false,
+  "errorMessage": "optional error description",
+  "contextModification": "optional text to inject"
+}
+"""
+
+import json
+import sys
+import os
+from pathlib import Path
+from datetime import datetime, timedelta
+
+ENABLED = os.environ.get("CONTEXTSTREAM_HOOK_ENABLED", "true").lower() == "true"
+INDEX_STATUS_FILE = Path.home() / ".contextstream" / "indexed-projects.json"
+STALE_THRESHOLD_DAYS = 7
+
+DISCOVERY_PATTERNS = ["**/*", "**/", "src/**", "lib/**", "app/**", "components/**"]
+
+def is_discovery_glob(pattern):
+    pattern_lower = pattern.lower()
+    for p in DISCOVERY_PATTERNS:
+        if p in pattern_lower:
+            return True
+    if pattern_lower.startswith("**/*.") or pattern_lower.startswith("**/"):
+        return True
+    if "**" in pattern or "*/" in pattern:
+        return True
+    return False
+
+def is_discovery_grep(file_path):
+    if not file_path or file_path in [".", "./", "*", "**"]:
+        return True
+    if "*" in file_path or "**" in file_path:
+        return True
+    return False
+
+def is_project_indexed(workspace_roots):
+    """Check if any workspace root is in an indexed project."""
+    if not INDEX_STATUS_FILE.exists():
+        return False, False
+
+    try:
+        with open(INDEX_STATUS_FILE, "r") as f:
+            data = json.load(f)
+    except:
+        return False, False
+
+    projects = data.get("projects", {})
+
+    for workspace in workspace_roots:
+        cwd_path = Path(workspace).resolve()
+        for project_path, info in projects.items():
+            try:
+                indexed_path = Path(project_path).resolve()
+                if cwd_path == indexed_path or indexed_path in cwd_path.parents:
+                    indexed_at = info.get("indexed_at")
+                    if indexed_at:
+                        try:
+                            indexed_time = datetime.fromisoformat(indexed_at.replace("Z", "+00:00"))
+                            if datetime.now(indexed_time.tzinfo) - indexed_time > timedelta(days=STALE_THRESHOLD_DAYS):
+                                return True, True
+                        except:
+                            pass
+                    return True, False
+            except:
+                continue
+    return False, False
+
+def output_allow(context_mod=None):
+    result = {"cancel": False}
+    if context_mod:
+        result["contextModification"] = context_mod
+    print(json.dumps(result))
+    sys.exit(0)
+
+def output_block(error_msg, context_mod=None):
+    result = {"cancel": True, "errorMessage": error_msg}
+    if context_mod:
+        result["contextModification"] = context_mod
+    print(json.dumps(result))
+    sys.exit(0)
+
+def main():
+    if not ENABLED:
+        output_allow()
+
+    try:
+        data = json.load(sys.stdin)
+    except:
+        output_allow()
+
+    hook_name = data.get("hookName", "")
+    if hook_name != "PreToolUse":
+        output_allow()
+
+    tool = data.get("toolName", "")
+    params = data.get("toolParameters", {})
+    workspace_roots = data.get("workspaceRoots", [])
+
+    # Check if project is indexed
+    is_indexed, is_stale = is_project_indexed(workspace_roots)
+    if not is_indexed:
+        output_allow()
+
+    # Check for discovery patterns
+    if tool == "list_files" or tool == "search_files":
+        pattern = params.get("path", "") or params.get("regex", "")
+        if is_discovery_glob(pattern) or is_discovery_grep(pattern):
+            output_block(
+                f"Use mcp__contextstream__search(mode=\\"hybrid\\", query=\\"{pattern}\\") instead of {tool}. "
+                "ContextStream search is indexed and faster. Only use local tools if ContextStream returns 0 results.",
+                "[CONTEXTSTREAM] Use ContextStream search for code discovery."
+            )
+
+    elif tool == "read_file":
+        # Allow read_file by default - blocking discovery at search level is enough
+        pass
+
+    output_allow()
+
+if __name__ == "__main__":
+    main()
+`;
+
+/**
+ * Cline UserPromptSubmit hook script.
+ */
+export const CLINE_USER_PROMPT_HOOK_SCRIPT = `#!/usr/bin/env python3
+"""
+ContextStream UserPromptSubmit Hook for Cline
+Injects reminder about ContextStream rules on every message.
+"""
+
+import json
+import sys
+import os
+
+ENABLED = os.environ.get("CONTEXTSTREAM_REMINDER_ENABLED", "true").lower() == "true"
+
+REMINDER = """[CONTEXTSTREAM RULES]
+1. BEFORE list_files/search_files/read_file: mcp__contextstream__search(mode="hybrid") FIRST
+2. Call context_smart at start of EVERY response
+3. Local tools ONLY if ContextStream returns 0 results
+[END RULES]"""
+
+def main():
+    if not ENABLED:
+        print(json.dumps({"cancel": False}))
+        sys.exit(0)
+
+    try:
+        json.load(sys.stdin)
+    except:
+        print(json.dumps({"cancel": False}))
+        sys.exit(0)
+
+    print(json.dumps({
+        "cancel": False,
+        "contextModification": REMINDER
+    }))
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+`;
+
+/**
+ * Get the path to Cline's global hooks directory.
+ */
+export function getClineHooksDir(scope: "global" | "project", projectPath?: string): string {
+  if (scope === "global") {
+    return path.join(homedir(), "Documents", "Cline", "Rules", "Hooks");
+  }
+  if (!projectPath) {
+    throw new Error("projectPath required for project scope");
+  }
+  return path.join(projectPath, ".clinerules", "hooks");
+}
+
+/**
+ * Install Cline hook scripts.
+ * Cline hooks are named after the hook type (no extension).
+ */
+export async function installClineHookScripts(options: {
+  scope: "global" | "project";
+  projectPath?: string;
+}): Promise<{ preToolUse: string; userPromptSubmit: string }> {
+  const hooksDir = getClineHooksDir(options.scope, options.projectPath);
+  await fs.mkdir(hooksDir, { recursive: true });
+
+  // Cline hooks are named after the hook type (no file extension)
+  const preToolUsePath = path.join(hooksDir, "PreToolUse");
+  const userPromptPath = path.join(hooksDir, "UserPromptSubmit");
+
+  await fs.writeFile(preToolUsePath, CLINE_PRETOOLUSE_HOOK_SCRIPT, { mode: 0o755 });
+  await fs.writeFile(userPromptPath, CLINE_USER_PROMPT_HOOK_SCRIPT, { mode: 0o755 });
+
+  return {
+    preToolUse: preToolUsePath,
+    userPromptSubmit: userPromptPath,
+  };
+}
+
+// =============================================================================
+// ROO CODE HOOKS SUPPORT (Fork of Cline)
+// =============================================================================
+
+/**
+ * Get the path to Roo Code's hooks directory.
+ * Roo Code is a fork of Cline with similar hooks system.
+ */
+export function getRooCodeHooksDir(scope: "global" | "project", projectPath?: string): string {
+  if (scope === "global") {
+    // Roo Code uses ~/.roo/hooks/ for global hooks
+    return path.join(homedir(), ".roo", "hooks");
+  }
+  if (!projectPath) {
+    throw new Error("projectPath required for project scope");
+  }
+  return path.join(projectPath, ".roo", "hooks");
+}
+
+/**
+ * Install Roo Code hook scripts (uses same scripts as Cline).
+ */
+export async function installRooCodeHookScripts(options: {
+  scope: "global" | "project";
+  projectPath?: string;
+}): Promise<{ preToolUse: string; userPromptSubmit: string }> {
+  const hooksDir = getRooCodeHooksDir(options.scope, options.projectPath);
+  await fs.mkdir(hooksDir, { recursive: true });
+
+  const preToolUsePath = path.join(hooksDir, "PreToolUse");
+  const userPromptPath = path.join(hooksDir, "UserPromptSubmit");
+
+  await fs.writeFile(preToolUsePath, CLINE_PRETOOLUSE_HOOK_SCRIPT, { mode: 0o755 });
+  await fs.writeFile(userPromptPath, CLINE_USER_PROMPT_HOOK_SCRIPT, { mode: 0o755 });
+
+  return {
+    preToolUse: preToolUsePath,
+    userPromptSubmit: userPromptPath,
+  };
+}
+
+// =============================================================================
+// KILO CODE HOOKS SUPPORT (Fork of Cline)
+// =============================================================================
+
+/**
+ * Get the path to Kilo Code's hooks directory.
+ * Kilo Code is a fork of Cline with similar hooks system.
+ */
+export function getKiloCodeHooksDir(scope: "global" | "project", projectPath?: string): string {
+  if (scope === "global") {
+    return path.join(homedir(), ".kilocode", "hooks");
+  }
+  if (!projectPath) {
+    throw new Error("projectPath required for project scope");
+  }
+  return path.join(projectPath, ".kilocode", "hooks");
+}
+
+/**
+ * Install Kilo Code hook scripts (uses same scripts as Cline).
+ */
+export async function installKiloCodeHookScripts(options: {
+  scope: "global" | "project";
+  projectPath?: string;
+}): Promise<{ preToolUse: string; userPromptSubmit: string }> {
+  const hooksDir = getKiloCodeHooksDir(options.scope, options.projectPath);
+  await fs.mkdir(hooksDir, { recursive: true });
+
+  const preToolUsePath = path.join(hooksDir, "PreToolUse");
+  const userPromptPath = path.join(hooksDir, "UserPromptSubmit");
+
+  await fs.writeFile(preToolUsePath, CLINE_PRETOOLUSE_HOOK_SCRIPT, { mode: 0o755 });
+  await fs.writeFile(userPromptPath, CLINE_USER_PROMPT_HOOK_SCRIPT, { mode: 0o755 });
+
+  return {
+    preToolUse: preToolUsePath,
+    userPromptSubmit: userPromptPath,
+  };
+}
+
+// =============================================================================
+// CURSOR HOOKS SUPPORT
+// =============================================================================
+
+/**
+ * Cursor PreToolUse hook script.
+ * Uses Cursor's output format: { decision: "allow" | "deny", reason?: string }
+ */
+export const CURSOR_PRETOOLUSE_HOOK_SCRIPT = `#!/usr/bin/env python3
+"""
+ContextStream PreToolUse Hook for Cursor
+Blocks discovery tools and redirects to ContextStream search.
+
+Cursor hooks use JSON output format:
+{
+  "decision": "allow" | "deny",
+  "reason": "optional error description"
+}
+"""
+
+import json
+import sys
+import os
+from pathlib import Path
+from datetime import datetime, timedelta
+
+ENABLED = os.environ.get("CONTEXTSTREAM_HOOK_ENABLED", "true").lower() == "true"
+INDEX_STATUS_FILE = Path.home() / ".contextstream" / "indexed-projects.json"
+STALE_THRESHOLD_DAYS = 7
+
+DISCOVERY_PATTERNS = ["**/*", "**/", "src/**", "lib/**", "app/**", "components/**"]
+
+def is_discovery_glob(pattern):
+    pattern_lower = pattern.lower()
+    for p in DISCOVERY_PATTERNS:
+        if p in pattern_lower:
+            return True
+    if pattern_lower.startswith("**/*.") or pattern_lower.startswith("**/"):
+        return True
+    if "**" in pattern or "*/" in pattern:
+        return True
+    return False
+
+def is_discovery_grep(file_path):
+    if not file_path or file_path in [".", "./", "*", "**"]:
+        return True
+    if "*" in file_path or "**" in file_path:
+        return True
+    return False
+
+def is_project_indexed(workspace_roots):
+    """Check if any workspace root is in an indexed project."""
+    if not INDEX_STATUS_FILE.exists():
+        return False, False
+
+    try:
+        with open(INDEX_STATUS_FILE, "r") as f:
+            data = json.load(f)
+    except:
+        return False, False
+
+    projects = data.get("projects", {})
+
+    for workspace in workspace_roots:
+        cwd_path = Path(workspace).resolve()
+        for project_path, info in projects.items():
+            try:
+                indexed_path = Path(project_path).resolve()
+                if cwd_path == indexed_path or indexed_path in cwd_path.parents:
+                    indexed_at = info.get("indexed_at")
+                    if indexed_at:
+                        try:
+                            indexed_time = datetime.fromisoformat(indexed_at.replace("Z", "+00:00"))
+                            if datetime.now(indexed_time.tzinfo) - indexed_time > timedelta(days=STALE_THRESHOLD_DAYS):
+                                return True, True
+                        except:
+                            pass
+                    return True, False
+            except:
+                continue
+    return False, False
+
+def output_allow():
+    print(json.dumps({"decision": "allow"}))
+    sys.exit(0)
+
+def output_deny(reason):
+    print(json.dumps({"decision": "deny", "reason": reason}))
+    sys.exit(0)
+
+def main():
+    if not ENABLED:
+        output_allow()
+
+    try:
+        data = json.load(sys.stdin)
+    except:
+        output_allow()
+
+    hook_name = data.get("hook_event_name", "")
+    if hook_name != "preToolUse":
+        output_allow()
+
+    tool = data.get("tool_name", "")
+    params = data.get("tool_input", {}) or data.get("parameters", {})
+    workspace_roots = data.get("workspace_roots", [])
+
+    # Check if project is indexed
+    is_indexed, _ = is_project_indexed(workspace_roots)
+    if not is_indexed:
+        output_allow()
+
+    # Check for Cursor tools
+    if tool in ["Glob", "glob", "list_files"]:
+        pattern = params.get("pattern", "") or params.get("path", "")
+        if is_discovery_glob(pattern):
+            output_deny(
+                f"Use mcp__contextstream__search(mode=\\"hybrid\\", query=\\"{pattern}\\") instead of {tool}. "
+                "ContextStream search is indexed and faster."
+            )
+
+    elif tool in ["Grep", "grep", "search_files", "ripgrep"]:
+        pattern = params.get("pattern", "") or params.get("regex", "")
+        file_path = params.get("path", "")
+        if is_discovery_grep(file_path):
+            output_deny(
+                f"Use mcp__contextstream__search(mode=\\"keyword\\", query=\\"{pattern}\\") instead of {tool}. "
+                "ContextStream search is indexed and faster."
+            )
+
+    output_allow()
+
+if __name__ == "__main__":
+    main()
+`;
+
+/**
+ * Cursor BeforeSubmitPrompt hook script.
+ */
+export const CURSOR_BEFORE_SUBMIT_HOOK_SCRIPT = `#!/usr/bin/env python3
+"""
+ContextStream BeforeSubmitPrompt Hook for Cursor
+Injects reminder about ContextStream rules.
+"""
+
+import json
+import sys
+import os
+
+ENABLED = os.environ.get("CONTEXTSTREAM_REMINDER_ENABLED", "true").lower() == "true"
+
+def main():
+    if not ENABLED:
+        print(json.dumps({"continue": True}))
+        sys.exit(0)
+
+    try:
+        json.load(sys.stdin)
+    except:
+        print(json.dumps({"continue": True}))
+        sys.exit(0)
+
+    print(json.dumps({
+        "continue": True,
+        "user_message": "[CONTEXTSTREAM] Search with mcp__contextstream__search before using Glob/Grep/Read"
+    }))
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+`;
+
+/**
+ * Cursor hooks.json configuration structure.
+ */
+export interface CursorHooksConfig {
+  version: number;
+  hooks: {
+    preToolUse?: Array<{
+      command: string;
+      type?: "command";
+      timeout?: number;
+      matcher?: { tool_name?: string };
+    }>;
+    beforeSubmitPrompt?: Array<{
+      command: string;
+      type?: "command";
+      timeout?: number;
+    }>;
+    [key: string]: unknown;
+  };
+}
+
+/**
+ * Get the path to Cursor's hooks configuration file.
+ */
+export function getCursorHooksConfigPath(scope: "global" | "project", projectPath?: string): string {
+  if (scope === "global") {
+    return path.join(homedir(), ".cursor", "hooks.json");
+  }
+  if (!projectPath) {
+    throw new Error("projectPath required for project scope");
+  }
+  return path.join(projectPath, ".cursor", "hooks.json");
+}
+
+/**
+ * Get the path to Cursor's hooks scripts directory.
+ */
+export function getCursorHooksDir(scope: "global" | "project", projectPath?: string): string {
+  if (scope === "global") {
+    return path.join(homedir(), ".cursor", "hooks");
+  }
+  if (!projectPath) {
+    throw new Error("projectPath required for project scope");
+  }
+  return path.join(projectPath, ".cursor", "hooks");
+}
+
+/**
+ * Read existing Cursor hooks config.
+ */
+export async function readCursorHooksConfig(
+  scope: "global" | "project",
+  projectPath?: string
+): Promise<CursorHooksConfig> {
+  const configPath = getCursorHooksConfigPath(scope, projectPath);
+  try {
+    const content = await fs.readFile(configPath, "utf-8");
+    return JSON.parse(content);
+  } catch {
+    return { version: 1, hooks: {} };
+  }
+}
+
+/**
+ * Write Cursor hooks config.
+ */
+export async function writeCursorHooksConfig(
+  config: CursorHooksConfig,
+  scope: "global" | "project",
+  projectPath?: string
+): Promise<void> {
+  const configPath = getCursorHooksConfigPath(scope, projectPath);
+  const dir = path.dirname(configPath);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+}
+
+/**
+ * Install Cursor hook scripts and update hooks.json config.
+ */
+export async function installCursorHookScripts(options: {
+  scope: "global" | "project";
+  projectPath?: string;
+}): Promise<{ preToolUse: string; beforeSubmitPrompt: string; config: string }> {
+  const hooksDir = getCursorHooksDir(options.scope, options.projectPath);
+  await fs.mkdir(hooksDir, { recursive: true });
+
+  const preToolUsePath = path.join(hooksDir, "contextstream-pretooluse.py");
+  const beforeSubmitPath = path.join(hooksDir, "contextstream-beforesubmit.py");
+
+  await fs.writeFile(preToolUsePath, CURSOR_PRETOOLUSE_HOOK_SCRIPT, { mode: 0o755 });
+  await fs.writeFile(beforeSubmitPath, CURSOR_BEFORE_SUBMIT_HOOK_SCRIPT, { mode: 0o755 });
+
+  // Update hooks.json config
+  const existingConfig = await readCursorHooksConfig(options.scope, options.projectPath);
+
+  // Remove any existing ContextStream hooks
+  const filterContextStreamHooks = (hooks: any[] | undefined): any[] => {
+    if (!hooks) return [];
+    return hooks.filter((h) => !h.command?.includes("contextstream"));
+  };
+
+  const config: CursorHooksConfig = {
+    version: 1,
+    hooks: {
+      ...existingConfig.hooks,
+      preToolUse: [
+        ...filterContextStreamHooks(existingConfig.hooks.preToolUse as any[]),
+        {
+          command: `python3 "${preToolUsePath}"`,
+          type: "command",
+          timeout: 5,
+          matcher: { tool_name: "Glob|Grep|search_files|list_files|ripgrep" },
+        },
+      ],
+      beforeSubmitPrompt: [
+        ...filterContextStreamHooks(existingConfig.hooks.beforeSubmitPrompt as any[]),
+        {
+          command: `python3 "${beforeSubmitPath}"`,
+          type: "command",
+          timeout: 5,
+        },
+      ],
+    },
+  };
+
+  await writeCursorHooksConfig(config, options.scope, options.projectPath);
+  const configPath = getCursorHooksConfigPath(options.scope, options.projectPath);
+
+  return {
+    preToolUse: preToolUsePath,
+    beforeSubmitPrompt: beforeSubmitPath,
+    config: configPath,
+  };
+}
+
+// =============================================================================
+// WINDSURF HOOKS
+// =============================================================================
+
+/**
+ * Windsurf pre_mcp_tool_use hook script.
+ * Blocks discovery tools and redirects to ContextStream search.
+ * Uses exit codes: 0=allow, 2=block
+ */
+export const WINDSURF_PRE_MCP_TOOL_USE_SCRIPT = `#!/usr/bin/env python3
+"""
+ContextStream pre_mcp_tool_use Hook for Windsurf
+Blocks discovery tools and redirects to ContextStream search.
+
+Exit codes:
+- 0: Allow action to proceed
+- 2: Block action (message to stderr)
+"""
+
+import json
+import sys
+import os
+
+ENABLED = os.environ.get("CONTEXTSTREAM_HOOK_ENABLED", "true").lower() == "true"
+
+# Tools to redirect
+DISCOVERY_TOOLS = {
+    "read_file": "Use mcp__contextstream__search(mode=\\"hybrid\\") for discovery",
+    "search_files": "Use mcp__contextstream__search(mode=\\"hybrid\\")",
+    "list_files": "Use mcp__contextstream__search(mode=\\"pattern\\")",
+    "codebase_search": "Use mcp__contextstream__search(mode=\\"hybrid\\")",
+    "grep_search": "Use mcp__contextstream__search(mode=\\"keyword\\")",
+}
+
+def is_project_indexed(workspace_roots):
+    """Check if any workspace has a .contextstream/index marker."""
+    for root in workspace_roots:
+        marker = os.path.join(root, ".contextstream", "index.json")
+        if os.path.exists(marker):
+            return True, root
+    return False, None
+
+def main():
+    if not ENABLED:
+        sys.exit(0)
+
+    try:
+        data = json.load(sys.stdin)
+    except:
+        sys.exit(0)
+
+    tool_info = data.get("tool_info", {})
+    tool_name = tool_info.get("tool_name", "")
+
+    # For MCP tools, check the server and tool
+    mcp_server = tool_info.get("mcp_server", "")
+
+    # Get workspace roots from the data
+    workspace_roots = []
+    if "working_directory" in data:
+        workspace_roots.append(data["working_directory"])
+
+    # Check if project is indexed
+    is_indexed, _ = is_project_indexed(workspace_roots)
+    if not is_indexed:
+        sys.exit(0)
+
+    # Check if this is a discovery tool we should redirect
+    if tool_name in DISCOVERY_TOOLS:
+        message = DISCOVERY_TOOLS[tool_name]
+        print(message, file=sys.stderr)
+        sys.exit(2)
+
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+`;
+
+/**
+ * Windsurf pre_user_prompt hook script.
+ * Injects reminder about ContextStream rules.
+ */
+export const WINDSURF_PRE_USER_PROMPT_SCRIPT = `#!/usr/bin/env python3
+"""
+ContextStream pre_user_prompt Hook for Windsurf
+Injects reminder about ContextStream rules.
+
+Note: This hook runs before prompt processing but cannot modify the prompt.
+It primarily serves for logging and validation purposes.
+"""
+
+import json
+import sys
+import os
+
+ENABLED = os.environ.get("CONTEXTSTREAM_REMINDER_ENABLED", "true").lower() == "true"
+
+def main():
+    if not ENABLED:
+        sys.exit(0)
+
+    try:
+        json.load(sys.stdin)
+    except:
+        sys.exit(0)
+
+    # Allow the prompt to proceed
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+`;
+
+/**
+ * Windsurf hooks.json configuration structure.
+ */
+export interface WindsurfHooksConfig {
+  hooks: {
+    pre_mcp_tool_use?: Array<{
+      command: string;
+      show_output?: boolean;
+      working_directory?: string;
+    }>;
+    pre_user_prompt?: Array<{
+      command: string;
+      show_output?: boolean;
+    }>;
+    [key: string]: unknown;
+  };
+}
+
+/**
+ * Get Windsurf hooks config path.
+ */
+export function getWindsurfHooksConfigPath(
+  scope: "global" | "project",
+  projectPath?: string
+): string {
+  if (scope === "project" && projectPath) {
+    return path.join(projectPath, ".windsurf", "hooks.json");
+  }
+  return path.join(homedir(), ".codeium", "windsurf", "hooks.json");
+}
+
+/**
+ * Get Windsurf hooks directory.
+ */
+export function getWindsurfHooksDir(
+  scope: "global" | "project",
+  projectPath?: string
+): string {
+  if (scope === "project" && projectPath) {
+    return path.join(projectPath, ".windsurf", "hooks");
+  }
+  return path.join(homedir(), ".codeium", "windsurf", "hooks");
+}
+
+/**
+ * Read Windsurf hooks config.
+ */
+export async function readWindsurfHooksConfig(
+  scope: "global" | "project",
+  projectPath?: string
+): Promise<WindsurfHooksConfig> {
+  const configPath = getWindsurfHooksConfigPath(scope, projectPath);
+  try {
+    const content = await fs.promises.readFile(configPath, "utf-8");
+    return JSON.parse(content);
+  } catch {
+    return { hooks: {} };
+  }
+}
+
+/**
+ * Write Windsurf hooks config.
+ */
+export async function writeWindsurfHooksConfig(
+  config: WindsurfHooksConfig,
+  scope: "global" | "project",
+  projectPath?: string
+): Promise<void> {
+  const configPath = getWindsurfHooksConfigPath(scope, projectPath);
+  const configDir = path.dirname(configPath);
+  await fs.promises.mkdir(configDir, { recursive: true });
+  await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2));
+}
+
+/**
+ * Filter out existing ContextStream hooks from Windsurf config.
+ */
+function filterWindsurfContextStreamHooks(
+  hooks: Array<{ command: string; [key: string]: unknown }> | undefined
+): Array<{ command: string; [key: string]: unknown }> {
+  if (!hooks) return [];
+  return hooks.filter((h) => !h.command?.includes("contextstream"));
+}
+
+/**
+ * Install Windsurf hooks.
+ */
+export async function installWindsurfHookScripts(options: {
+  scope?: "global" | "project";
+  projectPath?: string;
+}): Promise<{ preMcpToolUse: string; preUserPrompt: string; config: string }> {
+  const scope = options.scope || "global";
+  const hooksDir = getWindsurfHooksDir(scope, options.projectPath);
+
+  // Create hooks directory
+  await fs.promises.mkdir(hooksDir, { recursive: true });
+
+  // Write hook scripts
+  const preMcpToolUsePath = path.join(hooksDir, "contextstream-pretooluse.py");
+  const preUserPromptPath = path.join(hooksDir, "contextstream-reminder.py");
+
+  await fs.promises.writeFile(preMcpToolUsePath, WINDSURF_PRE_MCP_TOOL_USE_SCRIPT);
+  await fs.promises.writeFile(preUserPromptPath, WINDSURF_PRE_USER_PROMPT_SCRIPT);
+
+  // Make executable on Unix
+  if (process.platform !== "win32") {
+    await fs.promises.chmod(preMcpToolUsePath, 0o755);
+    await fs.promises.chmod(preUserPromptPath, 0o755);
+  }
+
+  // Read existing config and merge
+  const existingConfig = await readWindsurfHooksConfig(scope, options.projectPath);
+
+  const config: WindsurfHooksConfig = {
+    hooks: {
+      ...existingConfig.hooks,
+      pre_mcp_tool_use: [
+        ...filterWindsurfContextStreamHooks(existingConfig.hooks.pre_mcp_tool_use as any[]),
+        {
+          command: `python3 "${preMcpToolUsePath}"`,
+          show_output: true,
+        },
+      ],
+      pre_user_prompt: [
+        ...filterWindsurfContextStreamHooks(existingConfig.hooks.pre_user_prompt as any[]),
+        {
+          command: `python3 "${preUserPromptPath}"`,
+          show_output: false,
+        },
+      ],
+    },
+  };
+
+  await writeWindsurfHooksConfig(config, scope, options.projectPath);
+  const configPath = getWindsurfHooksConfigPath(scope, options.projectPath);
+
+  return {
+    preMcpToolUse: preMcpToolUsePath,
+    preUserPrompt: preUserPromptPath,
+    config: configPath,
+  };
+}
+
+// =============================================================================
+// UNIFIED EDITOR HOOKS INSTALLATION
+// =============================================================================
+
+export type SupportedEditor = "claude" | "cline" | "roo" | "kilo" | "cursor" | "windsurf";
+
+export interface EditorHooksResult {
+  editor: SupportedEditor;
+  installed: string[];
+  hooksDir: string;
+}
+
+/**
+ * Install hooks for a specific editor.
+ */
+export async function installEditorHooks(options: {
+  editor: SupportedEditor;
+  scope: "global" | "project";
+  projectPath?: string;
+  includePreCompact?: boolean;
+}): Promise<EditorHooksResult> {
+  const { editor, scope, projectPath, includePreCompact } = options;
+
+  switch (editor) {
+    case "claude": {
+      if (scope === "project" && !projectPath) {
+        throw new Error("projectPath required for project scope");
+      }
+      const scripts = await installHookScripts({ includePreCompact });
+      const hooksConfig = buildHooksConfig({ includePreCompact });
+
+      // Update Claude Code settings
+      const settingsScope = scope === "global" ? "user" : "project";
+      const existing = await readClaudeSettings(settingsScope, projectPath);
+      const merged = mergeHooksIntoSettings(existing, hooksConfig);
+      await writeClaudeSettings(merged, settingsScope, projectPath);
+
+      const installed = [scripts.preToolUse, scripts.userPrompt];
+      if (scripts.preCompact) installed.push(scripts.preCompact);
+
+      return {
+        editor: "claude",
+        installed,
+        hooksDir: getHooksDir(),
+      };
+    }
+
+    case "cline": {
+      const scripts = await installClineHookScripts({ scope, projectPath });
+      return {
+        editor: "cline",
+        installed: [scripts.preToolUse, scripts.userPromptSubmit],
+        hooksDir: getClineHooksDir(scope, projectPath),
+      };
+    }
+
+    case "roo": {
+      const scripts = await installRooCodeHookScripts({ scope, projectPath });
+      return {
+        editor: "roo",
+        installed: [scripts.preToolUse, scripts.userPromptSubmit],
+        hooksDir: getRooCodeHooksDir(scope, projectPath),
+      };
+    }
+
+    case "kilo": {
+      const scripts = await installKiloCodeHookScripts({ scope, projectPath });
+      return {
+        editor: "kilo",
+        installed: [scripts.preToolUse, scripts.userPromptSubmit],
+        hooksDir: getKiloCodeHooksDir(scope, projectPath),
+      };
+    }
+
+    case "cursor": {
+      const scripts = await installCursorHookScripts();
+      return {
+        editor: "cursor",
+        installed: [scripts.preToolUse, scripts.beforeSubmit],
+        hooksDir: getCursorHooksDir(),
+      };
+    }
+
+    case "windsurf": {
+      const scripts = await installWindsurfHookScripts({ scope, projectPath });
+      return {
+        editor: "windsurf",
+        installed: [scripts.preMcpToolUse, scripts.preUserPrompt],
+        hooksDir: getWindsurfHooksDir(scope, projectPath),
+      };
+    }
+
+    default:
+      throw new Error(`Unsupported editor: ${editor}`);
+  }
+}
+
+/**
+ * Install hooks for all supported editors.
+ */
+export async function installAllEditorHooks(options: {
+  scope: "global" | "project";
+  projectPath?: string;
+  includePreCompact?: boolean;
+  editors?: SupportedEditor[];
+}): Promise<EditorHooksResult[]> {
+  const editors = options.editors || ["claude", "cline", "roo", "kilo", "cursor", "windsurf"];
+  const results: EditorHooksResult[] = [];
+
+  for (const editor of editors) {
+    try {
+      const result = await installEditorHooks({
+        editor,
+        scope: options.scope,
+        projectPath: options.projectPath,
+        includePreCompact: options.includePreCompact,
+      });
+      results.push(result);
+    } catch (error) {
+      // Log but continue with other editors
+      console.error(`Failed to install hooks for ${editor}:`, error);
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Generate documentation for all editor hooks.
+ */
+export function generateAllHooksDocumentation(): string {
+  return `
+## Editor Hooks Support (ContextStream)
+
+ContextStream can install hooks for multiple AI code editors to enforce ContextStream-first behavior.
+
+### Supported Editors
+
+| Editor | Hooks Location | Hook Types |
+|--------|---------------|------------|
+| **Claude Code** | \`~/.claude/hooks/\` | PreToolUse, UserPromptSubmit, PreCompact |
+| **Cursor** | \`~/.cursor/hooks/\` | preToolUse, beforeSubmit |
+| **Windsurf** | \`~/.codeium/windsurf/hooks/\` | pre_mcp_tool_use, pre_user_prompt |
+| **Cline** | \`~/Documents/Cline/Rules/Hooks/\` | PreToolUse, UserPromptSubmit |
+| **Roo Code** | \`~/.roo/hooks/\` | PreToolUse, UserPromptSubmit |
+| **Kilo Code** | \`~/.kilocode/hooks/\` | PreToolUse, UserPromptSubmit |
+
+### Claude Code Hooks
+
+${generateHooksDocumentation()}
+
+### Cursor Hooks
+
+Cursor uses a \`hooks.json\` configuration file:
+- **preToolUse**: Blocks discovery tools before execution
+- **beforeSubmitPrompt**: Injects ContextStream rules reminder
+
+#### Output Format
+\`\`\`json
+{ "decision": "allow" }
+\`\`\`
+or
+\`\`\`json
+{ "decision": "deny", "reason": "Use ContextStream search instead" }
+\`\`\`
+
+### Cline/Roo/Kilo Code Hooks
+
+These editors use the same hook format (JSON output):
+- **PreToolUse**: Blocks discovery tools, redirects to ContextStream search
+- **UserPromptSubmit**: Injects ContextStream rules reminder
+
+Hooks are executable scripts named after the hook type (no extension).
+
+#### Output Format
+\`\`\`json
+{
+  "cancel": true,
+  "errorMessage": "Use ContextStream search instead",
+  "contextModification": "[CONTEXTSTREAM] Use search tool first"
+}
+\`\`\`
+
+### Installation
+
+Use \`generate_rules(install_hooks=true, editors=["claude", "cursor", "windsurf", "cline", "roo", "kilo"])\` to install hooks for specific editors, or omit \`editors\` to install for all.
+
+### Disabling Hooks
+
+Set environment variables:
+- \`CONTEXTSTREAM_HOOK_ENABLED=false\` - Disable PreToolUse blocking
+- \`CONTEXTSTREAM_REMINDER_ENABLED=false\` - Disable UserPromptSubmit reminders
+`.trim();
+}
