@@ -5725,19 +5725,28 @@ Use this in combination with session_init(is_post_compact=true) for seamless con
           };
         }
 
-        // Otherwise, search for most recent session_snapshot events
-        const searchResult = await client.searchEvents({
+        // List recent events and filter for session_snapshot type
+        const listResult = await client.listMemoryEvents({
           workspace_id: workspaceId,
           project_id: projectId,
-          query: "session_snapshot",
-          event_types: ["session_snapshot"],
-          limit: input.max_snapshots || 1,
+          limit: 50, // Fetch more to filter
         });
 
-        const events = (searchResult as any)?.data?.results ||
-          (searchResult as any)?.results ||
-          (searchResult as any)?.data ||
+        const allEvents =
+          (listResult as any)?.data?.items ||
+          (listResult as any)?.items ||
+          (listResult as any)?.data ||
           [];
+
+        // Filter for session_snapshot events (check event_type, metadata.original_type, or tags)
+        const events = allEvents
+          .filter((e: any) =>
+            e.event_type === "session_snapshot" ||
+            e.metadata?.original_type === "session_snapshot" ||
+            e.metadata?.tags?.includes("session_snapshot") ||
+            e.tags?.includes("session_snapshot")
+          )
+          .slice(0, input.max_snapshots || 1);
 
         if (!events || events.length === 0) {
           return {
@@ -8182,7 +8191,7 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
       "session",
       {
         title: "Session",
-        description: `Session management operations. Actions: capture (save decision/insight), capture_lesson (save lesson from mistake), get_lessons (retrieve lessons), recall (natural language recall), remember (quick save), user_context (get preferences), summary (workspace summary), compress (compress chat), delta (changes since timestamp), smart_search (context-enriched search), decision_trace (trace decision provenance). Plan actions: capture_plan (save implementation plan), get_plan (retrieve plan with tasks), update_plan (modify plan), list_plans (list all plans).`,
+        description: `Session management operations. Actions: capture (save decision/insight), capture_lesson (save lesson from mistake), get_lessons (retrieve lessons), recall (natural language recall), remember (quick save), user_context (get preferences), summary (workspace summary), compress (compress chat), delta (changes since timestamp), smart_search (context-enriched search), decision_trace (trace decision provenance), restore_context (restore state after compaction). Plan actions: capture_plan (save implementation plan), get_plan (retrieve plan with tasks), update_plan (modify plan), list_plans (list all plans).`,
         inputSchema: z.object({
           action: z
             .enum([
@@ -8202,6 +8211,8 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
               "get_plan",
               "update_plan",
               "list_plans",
+              // Context restore
+              "restore_context",
             ])
             .describe("Action to perform"),
           workspace_id: z.string().uuid().optional(),
@@ -8226,6 +8237,7 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
               "warning",
               "frustration",
               "conversation",
+              "session_snapshot",
             ])
             .optional()
             .describe("Event type for capture"),
@@ -8290,6 +8302,17 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
           due_at: z.string().optional().describe("Due date for plan (ISO timestamp)"),
           source_tool: z.string().optional().describe("Tool that generated this plan"),
           include_tasks: z.boolean().optional().describe("Include tasks when getting plan"),
+          // Restore context params
+          snapshot_id: z
+            .string()
+            .uuid()
+            .optional()
+            .describe("Specific snapshot ID to restore (defaults to most recent)"),
+          max_snapshots: z
+            .number()
+            .optional()
+            .default(1)
+            .describe("Number of recent snapshots to consider (default: 1)"),
         }),
       },
       async (input) => {
@@ -8622,6 +8645,114 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
             return {
               content: [{ type: "text" as const, text: formatContent(result) }],
               structuredContent: toStructured(result),
+            };
+          }
+
+          case "restore_context": {
+            if (!workspaceId) {
+              return errorResult(
+                "restore_context requires workspace_id. Call session_init first."
+              );
+            }
+
+            // If specific snapshot_id provided, fetch that event
+            if (input.snapshot_id) {
+              const eventResult = await client.getEvent(input.snapshot_id);
+              const event = (eventResult as any)?.data || eventResult;
+
+              if (!event || !event.content) {
+                return errorResult(
+                  `Snapshot not found: ${input.snapshot_id}. The snapshot may have been deleted or does not exist.`
+                );
+              }
+
+              // Parse the snapshot content
+              let snapshotData: Record<string, unknown>;
+              try {
+                snapshotData = JSON.parse(event.content);
+              } catch {
+                snapshotData = { conversation_summary: event.content };
+              }
+
+              const response = {
+                restored: true,
+                snapshot_id: event.id,
+                captured_at: snapshotData.captured_at || event.created_at,
+                ...snapshotData,
+                hint: "Context restored. Continue the conversation with awareness of the above state.",
+              };
+
+              return {
+                content: [{ type: "text" as const, text: formatContent(response) }],
+                structuredContent: toStructured(response),
+              };
+            }
+
+            // List recent events and filter for session_snapshot type
+            const listResult = await client.listMemoryEvents({
+              workspace_id: workspaceId,
+              project_id: projectId,
+              limit: 50, // Fetch more to filter
+            });
+
+            const allEvents =
+              (listResult as any)?.data?.items ||
+              (listResult as any)?.items ||
+              (listResult as any)?.data ||
+              [];
+
+            // Filter for session_snapshot events (check event_type, metadata.original_type, or tags)
+            const snapshotEvents = allEvents
+              .filter((e: any) =>
+                e.event_type === "session_snapshot" ||
+                e.metadata?.original_type === "session_snapshot" ||
+                e.metadata?.tags?.includes("session_snapshot") ||
+                e.tags?.includes("session_snapshot")
+              )
+              .slice(0, input.max_snapshots || 1);
+
+            if (!snapshotEvents || snapshotEvents.length === 0) {
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: formatContent({
+                      restored: false,
+                      message:
+                        "No session snapshots found. Use session_capture_smart to save state before compaction.",
+                      hint: "Start fresh or use session_init to get recent context.",
+                    }),
+                  },
+                ],
+              };
+            }
+
+            // Parse and return the most recent snapshot(s)
+            const snapshots = snapshotEvents.map((event: any) => {
+              let snapshotData: Record<string, unknown>;
+              try {
+                snapshotData = JSON.parse(event.content || "{}");
+              } catch {
+                snapshotData = { conversation_summary: event.content };
+              }
+              return {
+                snapshot_id: event.id,
+                captured_at: snapshotData.captured_at || event.created_at,
+                ...snapshotData,
+              };
+            });
+
+            const response = {
+              restored: true,
+              snapshots_found: snapshots.length,
+              latest: snapshots[0],
+              all_snapshots: snapshots.length > 1 ? snapshots : undefined,
+              hint: "Context restored. Continue the conversation with awareness of the above state.",
+            };
+
+            return {
+              content: [{ type: "text" as const, text: formatContent(response) }],
+              structuredContent: toStructured(response),
             };
           }
 
