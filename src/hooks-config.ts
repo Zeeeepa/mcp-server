@@ -253,6 +253,49 @@ AUTO_SAVE = os.environ.get("CONTEXTSTREAM_PRECOMPACT_AUTO_SAVE", "true").lower()
 API_URL = os.environ.get("CONTEXTSTREAM_API_URL", "https://api.contextstream.io")
 API_KEY = os.environ.get("CONTEXTSTREAM_API_KEY", "")
 
+WORKSPACE_ID = None
+
+def load_config_from_mcp_json(cwd):
+    """Load API config from .mcp.json if env vars not set."""
+    global API_URL, API_KEY, WORKSPACE_ID
+
+    # Try to find .mcp.json and .contextstream/config.json in cwd or parent directories
+    search_dir = cwd
+    for _ in range(5):  # Search up to 5 levels
+        # Load API config from .mcp.json
+        if not API_KEY:
+            mcp_path = os.path.join(search_dir, ".mcp.json")
+            if os.path.exists(mcp_path):
+                try:
+                    with open(mcp_path, 'r') as f:
+                        config = json.load(f)
+                    servers = config.get("mcpServers", {})
+                    cs_config = servers.get("contextstream", {})
+                    env = cs_config.get("env", {})
+                    if env.get("CONTEXTSTREAM_API_KEY"):
+                        API_KEY = env["CONTEXTSTREAM_API_KEY"]
+                    if env.get("CONTEXTSTREAM_API_URL"):
+                        API_URL = env["CONTEXTSTREAM_API_URL"]
+                except:
+                    pass
+
+        # Load workspace_id from .contextstream/config.json
+        if not WORKSPACE_ID:
+            cs_config_path = os.path.join(search_dir, ".contextstream", "config.json")
+            if os.path.exists(cs_config_path):
+                try:
+                    with open(cs_config_path, 'r') as f:
+                        cs_config = json.load(f)
+                    if cs_config.get("workspace_id"):
+                        WORKSPACE_ID = cs_config["workspace_id"]
+                except:
+                    pass
+
+        parent = os.path.dirname(search_dir)
+        if parent == search_dir:
+            break
+        search_dir = parent
+
 def parse_transcript(transcript_path):
     """Parse transcript to extract active files, decisions, and context."""
     active_files = set()
@@ -324,6 +367,10 @@ def save_snapshot(session_id, transcript_data, trigger):
         "source_type": "hook",
     }
 
+    # Add workspace_id if available
+    if WORKSPACE_ID:
+        payload["workspace_id"] = WORKSPACE_ID
+
     try:
         req = urllib.request.Request(
             f"{API_URL}/api/v1/memory/events",
@@ -349,6 +396,10 @@ def main():
         data = json.load(sys.stdin)
     except:
         sys.exit(0)
+
+    # Load config from .mcp.json if env vars not set
+    cwd = data.get("cwd", os.getcwd())
+    load_config_from_mcp_json(cwd)
 
     session_id = data.get("session_id", "unknown")
     transcript_path = data.get("transcript_path", "")
