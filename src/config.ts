@@ -20,6 +20,7 @@ const configSchema = z.object({
   userAgent: z.string().default(`contextstream-mcp/${VERSION}`),
   allowHeaderAuth: z.boolean().optional(),
   contextPackEnabled: z.boolean().default(true),
+  showTiming: z.boolean().default(false),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -42,6 +43,7 @@ export function loadConfig(): Config {
   const contextPackEnabled = parseBooleanEnv(
     process.env.CONTEXTSTREAM_CONTEXT_PACK ?? process.env.CONTEXTSTREAM_CONTEXT_PACK_ENABLED
   );
+  const showTiming = parseBooleanEnv(process.env.CONTEXTSTREAM_SHOW_TIMING);
   const parsed = configSchema.safeParse({
     apiUrl: process.env.CONTEXTSTREAM_API_URL,
     apiKey: process.env.CONTEXTSTREAM_API_KEY,
@@ -51,6 +53,7 @@ export function loadConfig(): Config {
     userAgent: process.env.CONTEXTSTREAM_USER_AGENT,
     allowHeaderAuth,
     contextPackEnabled,
+    showTiming,
   });
 
   if (!parsed.success) {

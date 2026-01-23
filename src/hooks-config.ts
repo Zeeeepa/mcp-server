@@ -212,6 +212,86 @@ if __name__ == "__main__":
 `;
 
 /**
+ * The PreCompact hook script that saves conversation state before compaction.
+ * This runs before Claude Code compacts the context (either manual /compact or auto).
+ */
+export const PRECOMPACT_HOOK_SCRIPT = `#!/usr/bin/env python3
+"""
+ContextStream PreCompact Hook for Claude Code
+
+Runs BEFORE conversation context is compacted (manual via /compact or automatic).
+Injects a reminder for the AI to save conversation state using session_capture_smart.
+
+Input (via stdin):
+{
+  "session_id": "...",
+  "transcript_path": "/path/to/transcript.jsonl",
+  "permission_mode": "default",
+  "hook_event_name": "PreCompact",
+  "trigger": "manual" | "auto",
+  "custom_instructions": "..."
+}
+
+Output (to stdout):
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreCompact",
+    "additionalContext": "... instructions for AI ..."
+  }
+}
+"""
+
+import json
+import sys
+import os
+
+ENABLED = os.environ.get("CONTEXTSTREAM_PRECOMPACT_ENABLED", "true").lower() == "true"
+
+def main():
+    if not ENABLED:
+        sys.exit(0)
+
+    try:
+        data = json.load(sys.stdin)
+    except:
+        sys.exit(0)
+
+    trigger = data.get("trigger", "unknown")
+    custom_instructions = data.get("custom_instructions", "")
+
+    # Build context injection for the AI
+    context = f"""[CONTEXT COMPACTION IMMINENT - {trigger.upper()}]
+CRITICAL: Before context is compacted, you MUST save conversation state:
+
+1. IMMEDIATELY call: mcp__contextstream__session(action="capture", event_type="session_snapshot", title="Pre-compaction snapshot", content="<JSON with: conversation_summary, active_goals, recent_decisions, active_files, unfinished_work>")
+
+2. Include in the snapshot:
+   - conversation_summary: Brief summary of what was discussed
+   - active_goals: List of goals/tasks in progress
+   - recent_decisions: Key decisions made in this session
+   - active_files: Files currently being worked on
+   - unfinished_work: Any incomplete tasks
+
+3. After compaction, call session_init(is_post_compact=true) to restore context.
+
+{f"User instructions: {custom_instructions}" if custom_instructions else ""}
+[END COMPACTION WARNING]"""
+
+    output = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreCompact",
+            "additionalContext": context
+        }
+    }
+
+    print(json.dumps(output))
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+`;
+
+/**
  * Get the path to Claude Code's settings file.
  */
 export function getClaudeSettingsPath(scope: "user" | "project", projectPath?: string): string {
@@ -234,12 +314,15 @@ export function getHooksDir(): string {
 /**
  * Build the hooks configuration for Claude Code settings.
  */
-export function buildHooksConfig(): ClaudeHooksConfig["hooks"] {
+export function buildHooksConfig(options?: {
+  includePreCompact?: boolean;
+}): ClaudeHooksConfig["hooks"] {
   const hooksDir = getHooksDir();
   const preToolUsePath = path.join(hooksDir, "contextstream-redirect.py");
   const userPromptPath = path.join(hooksDir, "contextstream-reminder.py");
+  const preCompactPath = path.join(hooksDir, "contextstream-precompact.py");
 
-  return {
+  const config: ClaudeHooksConfig["hooks"] = {
     PreToolUse: [
       {
         matcher: "Glob|Grep|Search|Task|EnterPlanMode",
@@ -265,22 +348,55 @@ export function buildHooksConfig(): ClaudeHooksConfig["hooks"] {
       },
     ],
   };
+
+  // Add PreCompact hook for context compaction awareness (opt-in)
+  if (options?.includePreCompact) {
+    config.PreCompact = [
+      {
+        // Match both manual (/compact) and automatic compaction
+        matcher: "*",
+        hooks: [
+          {
+            type: "command",
+            command: `python3 "${preCompactPath}"`,
+            timeout: 10,
+          },
+        ],
+      },
+    ];
+  }
+
+  return config;
 }
 
 /**
  * Install hook scripts to ~/.claude/hooks/
  */
-export async function installHookScripts(): Promise<{ preToolUse: string; userPrompt: string }> {
+export async function installHookScripts(options?: {
+  includePreCompact?: boolean;
+}): Promise<{ preToolUse: string; userPrompt: string; preCompact?: string }> {
   const hooksDir = getHooksDir();
   await fs.mkdir(hooksDir, { recursive: true });
 
   const preToolUsePath = path.join(hooksDir, "contextstream-redirect.py");
   const userPromptPath = path.join(hooksDir, "contextstream-reminder.py");
+  const preCompactPath = path.join(hooksDir, "contextstream-precompact.py");
 
   await fs.writeFile(preToolUsePath, PRETOOLUSE_HOOK_SCRIPT, { mode: 0o755 });
   await fs.writeFile(userPromptPath, USER_PROMPT_HOOK_SCRIPT, { mode: 0o755 });
 
-  return { preToolUse: preToolUsePath, userPrompt: userPromptPath };
+  const result: { preToolUse: string; userPrompt: string; preCompact?: string } = {
+    preToolUse: preToolUsePath,
+    userPrompt: userPromptPath,
+  };
+
+  // Install PreCompact hook script if requested
+  if (options?.includePreCompact) {
+    await fs.writeFile(preCompactPath, PRECOMPACT_HOOK_SCRIPT, { mode: 0o755 });
+    result.preCompact = preCompactPath;
+  }
+
+  return result;
 }
 
 /**
@@ -350,22 +466,29 @@ export async function installClaudeCodeHooks(options: {
   scope: "user" | "project" | "both";
   projectPath?: string;
   dryRun?: boolean;
+  includePreCompact?: boolean;
 }): Promise<{ scripts: string[]; settings: string[] }> {
   const result = { scripts: [] as string[], settings: [] as string[] };
 
   // Install hook scripts
   if (!options.dryRun) {
-    const scripts = await installHookScripts();
+    const scripts = await installHookScripts({ includePreCompact: options.includePreCompact });
     result.scripts.push(scripts.preToolUse, scripts.userPrompt);
+    if (scripts.preCompact) {
+      result.scripts.push(scripts.preCompact);
+    }
   } else {
     const hooksDir = getHooksDir();
     result.scripts.push(
       path.join(hooksDir, "contextstream-redirect.py"),
       path.join(hooksDir, "contextstream-reminder.py")
     );
+    if (options.includePreCompact) {
+      result.scripts.push(path.join(hooksDir, "contextstream-precompact.py"));
+    }
   }
 
-  const hooksConfig = buildHooksConfig();
+  const hooksConfig = buildHooksConfig({ includePreCompact: options.includePreCompact });
 
   // Update user settings
   if (options.scope === "user" || options.scope === "both") {
@@ -412,6 +535,17 @@ ContextStream installs hooks to help enforce ContextStream-first behavior:
 - **Purpose:** Injects a reminder about ContextStream rules on every message
 - **Disable:** Set \`CONTEXTSTREAM_REMINDER_ENABLED=false\` environment variable
 
+### PreCompact Hook (Optional)
+- **File:** \`~/.claude/hooks/contextstream-precompact.py\`
+- **Purpose:** Saves conversation state before context compaction
+- **Triggers:** Both manual (/compact) and automatic compaction
+- **Disable:** Set \`CONTEXTSTREAM_PRECOMPACT_ENABLED=false\` environment variable
+- **Note:** Enable with \`generate_rules(install_hooks=true)\` to activate
+
+When PreCompact runs, it injects instructions for the AI to:
+1. Save a session_snapshot with conversation summary, active goals, and decisions
+2. Use \`session_init(is_post_compact=true)\` after compaction to restore context
+
 ### Why Hooks?
 Claude Code has strong built-in behaviors to use its default tools (Grep, Glob, Read)
 and its built-in plan mode. CLAUDE.md instructions decay over long conversations.
@@ -420,6 +554,7 @@ Hooks provide:
 2. **Continuous reminders** - Rules stay in recent context
 3. **Better UX** - Faster searches via indexed ContextStream
 4. **Persistent plans** - ContextStream plans survive across sessions
+5. **Compaction awareness** - Save state before context is compacted
 
 ### Manual Configuration
 If you prefer to configure manually, add to \`~/.claude/settings.json\`:
@@ -433,6 +568,10 @@ If you prefer to configure manually, add to \`~/.claude/settings.json\`:
     "UserPromptSubmit": [{
       "matcher": "*",
       "hooks": [{"type": "command", "command": "python3 ~/.claude/hooks/contextstream-reminder.py"}]
+    }],
+    "PreCompact": [{
+      "matcher": "*",
+      "hooks": [{"type": "command", "command": "python3 ~/.claude/hooks/contextstream-precompact.py", "timeout": 10}]
     }]
   }
 }
