@@ -21,6 +21,10 @@ export class SessionManager {
   private contextSmartCalled = false;
   private warningShown = false;
 
+  // Token tracking for context pressure calculation
+  private sessionTokens = 0;
+  private contextThreshold = 70000; // Conservative default for 100k context window
+
   constructor(
     private server: McpServer,
     private client: ContextStreamClient
@@ -84,6 +88,58 @@ export class SessionManager {
    */
   markContextSmartCalled() {
     this.contextSmartCalled = true;
+  }
+
+  /**
+   * Get current session token count for context pressure calculation.
+   */
+  getSessionTokens(): number {
+    return this.sessionTokens;
+  }
+
+  /**
+   * Get the context threshold (max tokens before compaction warning).
+   */
+  getContextThreshold(): number {
+    return this.contextThreshold;
+  }
+
+  /**
+   * Set a custom context threshold (useful if client provides model info).
+   */
+  setContextThreshold(threshold: number) {
+    this.contextThreshold = threshold;
+  }
+
+  /**
+   * Add tokens to the session count.
+   * Call this after each tool response to track token accumulation.
+   *
+   * @param tokens - Exact token count or text to estimate
+   */
+  addTokens(tokens: number | string) {
+    if (typeof tokens === "number") {
+      this.sessionTokens += tokens;
+    } else {
+      // Estimate tokens from text (roughly 4 chars per token)
+      this.sessionTokens += Math.ceil(tokens.length / 4);
+    }
+  }
+
+  /**
+   * Estimate tokens from a tool response.
+   * Uses a simple heuristic: ~4 characters per token.
+   */
+  estimateTokens(content: string | object): number {
+    const text = typeof content === "string" ? content : JSON.stringify(content);
+    return Math.ceil(text.length / 4);
+  }
+
+  /**
+   * Reset token count (e.g., after compaction or new session).
+   */
+  resetTokenCount() {
+    this.sessionTokens = 0;
   }
 
   /**

@@ -7,6 +7,12 @@ export interface WorkspaceConfig {
   project_id?: string;
   project_name?: string;
   associated_at?: string;
+  // Added for version tracking and config consistency with desktop app
+  version?: string;
+  configured_editors?: string[];
+  context_pack?: boolean;
+  api_url?: string;
+  updated_at?: string;
 }
 
 export interface ParentMapping {

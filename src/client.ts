@@ -2161,14 +2161,24 @@ export class ContextStreamClient {
     workspace_id: string;
     workspace_name?: string;
     create_parent_mapping?: boolean; // Also create a parent folder mapping
+    // Additional config fields for version tracking
+    version?: string;
+    configured_editors?: string[];
+    context_pack?: boolean;
+    api_url?: string;
   }) {
-    const { folder_path, workspace_id, workspace_name, create_parent_mapping } = params;
+    const { folder_path, workspace_id, workspace_name, create_parent_mapping, version, configured_editors, context_pack, api_url } = params;
 
     // Save local config
     const saved = writeLocalConfig(folder_path, {
       workspace_id,
       workspace_name,
       associated_at: new Date().toISOString(),
+      version,
+      configured_editors,
+      context_pack,
+      api_url,
+      updated_at: new Date().toISOString(),
     });
 
     // Optionally create parent folder mapping (e.g., /home/user/dev/company/* -> workspace)
@@ -3052,6 +3062,10 @@ export class ContextStreamClient {
     format?: "minified" | "readable" | "structured";
     mode?: "standard" | "pack";
     distill?: boolean;
+    /** Cumulative session token count for context pressure calculation */
+    session_tokens?: number;
+    /** Custom context window threshold (defaults to 70k) */
+    context_threshold?: number;
   }): Promise<{
     context: string;
     token_estimate: number;
@@ -3062,6 +3076,15 @@ export class ContextStreamClient {
     errors?: string[];
     version_notice?: VersionNotice;
     index_status?: "refreshing" | "fresh" | "stale";
+    /** Context pressure indicator for compaction awareness */
+    context_pressure?: {
+      level: "low" | "medium" | "high" | "critical";
+      session_tokens: number;
+      threshold: number;
+      usage_percent: number;
+      threshold_warning: boolean;
+      suggested_action: "none" | "prepare_save" | "save_now";
+    };
   }> {
     const withDefaults = this.withDefaults(params);
     const maxTokens = params.max_tokens || 800;
@@ -3160,6 +3183,9 @@ export class ContextStreamClient {
           client_version: VERSION,
           rules_version: VERSION,
           notice_inline: false,
+          // Session token tracking for context pressure
+          ...(params.session_tokens !== undefined && { session_tokens: params.session_tokens }),
+          ...(params.context_threshold !== undefined && { context_threshold: params.context_threshold }),
         },
       });
       const data = unwrapApiResponse<any>(apiResult);
@@ -3183,6 +3209,7 @@ export class ContextStreamClient {
         ...(versionNotice ? { version_notice: versionNotice } : {}),
         ...(Array.isArray(data?.errors) ? { errors: data.errors } : {}),
         ...(this.indexRefreshInProgress ? { index_status: "refreshing" as const } : {}),
+        ...(data?.context_pressure ? { context_pressure: data.context_pressure } : {}),
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -233,6 +233,39 @@ If context still feels missing, use \`session(action="recall", query="...")\` fo
 
 ---
 
+### Context Pressure & Compaction Awareness
+
+ContextStream tracks context pressure to help you stay ahead of conversation compaction:
+
+**Automatic tracking:** Token usage is tracked automatically. \`context_smart\` returns \`context_pressure\` when usage is high.
+
+**When \`context_smart\` returns \`context_pressure\` with high/critical level:**
+1. Review the \`suggested_action\` field:
+   - \`prepare_save\`: Start thinking about saving important state
+   - \`save_now\`: Immediately call \`session(action="capture", event_type="session_snapshot")\` to preserve state
+
+**PreCompact Hook (Optional):** If enabled, Claude Code will inject a reminder to save state before compaction.
+Enable with: \`generate_rules(install_hooks=true, include_pre_compact=true)\`
+
+**Before compaction happens (when warned):**
+\`\`\`
+session(action="capture", event_type="session_snapshot", title="Pre-compaction snapshot", content="{
+  \\"conversation_summary\\": \\"<summarize what we've been doing>\\",
+  \\"current_goal\\": \\"<the main task>\\",
+  \\"active_files\\": [\\"file1.ts\\", \\"file2.ts\\"],
+  \\"recent_decisions\\": [{title: \\"...\\", rationale: \\"...\\"}],
+  \\"unfinished_work\\": [{task: \\"...\\", status: \\"...\\", next_steps: \\"...\\"}]
+}")
+\`\`\`
+
+**After compaction (when context seems lost):**
+1. Call \`session_init(folder_path="...", is_post_compact=true)\` - this auto-restores the most recent snapshot
+2. Or call \`session_restore_context()\` directly to get the saved state
+3. Review the \`restored_context\` to understand prior work
+4. Acknowledge to the user what was restored and continue
+
+---
+
 ### Index Status (Auto-Managed)
 
 **Indexing is automatic.** After \`session_init\`, the project is auto-indexed in the background.
@@ -466,6 +499,11 @@ ContextStream search is **indexed** and returns semantic matches + context in ON
 - After \`session_init\`: Check for \`lessons\` field and apply before work
 - Before risky work: \`session(action="get_lessons", query="<topic>")\`
 - On mistakes: \`session(action="capture_lesson", title="...", trigger="...", impact="...", prevention="...")\`
+
+### Context Pressure & Compaction
+
+- If \`context_smart\` returns high/critical \`context_pressure\`: call \`session_capture_smart(...)\` to save state
+- After compaction (context lost): call \`session_init(..., is_post_compact=true)\` or \`session_restore_context()\`
 
 ### Plans & Tasks
 

@@ -485,6 +485,7 @@ function buildContextStreamMcpServer(params: {
   apiKey: string;
   toolset?: Toolset;
   contextPackEnabled?: boolean;
+  showTiming?: boolean;
 }): McpServerJson {
   const env: Record<string, string> = {
     CONTEXTSTREAM_API_URL: params.apiUrl,
@@ -495,6 +496,9 @@ function buildContextStreamMcpServer(params: {
     env.CONTEXTSTREAM_PROGRESSIVE_MODE = "true";
   }
   env.CONTEXTSTREAM_CONTEXT_PACK = params.contextPackEnabled === false ? "false" : "true";
+  if (params.showTiming) {
+    env.CONTEXTSTREAM_SHOW_TIMING = "true";
+  }
   // consolidated is the default, no env var needed
   // Windows requires cmd /c wrapper to execute npx
   if (IS_WINDOWS) {
@@ -523,6 +527,7 @@ function buildContextStreamVsCodeServer(params: {
   apiKey: string;
   toolset?: Toolset;
   contextPackEnabled?: boolean;
+  showTiming?: boolean;
 }): VsCodeServerJson {
   const env: Record<string, string> = {
     CONTEXTSTREAM_API_URL: params.apiUrl,
@@ -533,6 +538,9 @@ function buildContextStreamVsCodeServer(params: {
     env.CONTEXTSTREAM_PROGRESSIVE_MODE = "true";
   }
   env.CONTEXTSTREAM_CONTEXT_PACK = params.contextPackEnabled === false ? "false" : "true";
+  if (params.showTiming) {
+    env.CONTEXTSTREAM_SHOW_TIMING = "true";
+  }
   // consolidated is the default, no env var needed
   // Windows requires cmd /c wrapper to execute npx
   if (IS_WINDOWS) {
@@ -655,7 +663,7 @@ function claudeDesktopConfigPath(): string | null {
 
 async function upsertCodexTomlConfig(
   filePath: string,
-  params: { apiUrl: string; apiKey: string; toolset?: Toolset; contextPackEnabled?: boolean }
+  params: { apiUrl: string; apiKey: string; toolset?: Toolset; contextPackEnabled?: boolean; showTiming?: boolean }
 ): Promise<"created" | "updated" | "skipped"> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const exists = await fileExists(filePath);
@@ -668,6 +676,7 @@ async function upsertCodexTomlConfig(
   const toolsetLine =
     params.toolset === "router" ? `CONTEXTSTREAM_PROGRESSIVE_MODE = "true"\n` : "";
   const contextPackLine = `CONTEXTSTREAM_CONTEXT_PACK = "${params.contextPackEnabled === false ? "false" : "true"}"\n`;
+  const showTimingLine = params.showTiming ? `CONTEXTSTREAM_SHOW_TIMING = "true"\n` : "";
   // Windows requires cmd /c wrapper to execute npx
   const commandLine = IS_WINDOWS
     ? `command = "cmd"\nargs = ["/c", "npx", "-y", "@contextstream/mcp-server"]\n`
@@ -680,7 +689,8 @@ async function upsertCodexTomlConfig(
     `CONTEXTSTREAM_API_URL = "${params.apiUrl}"\n` +
     `CONTEXTSTREAM_API_KEY = "${params.apiKey}"\n` +
     toolsetLine +
-    contextPackLine;
+    contextPackLine +
+    showTimingLine;
 
   if (!exists) {
     await fs.writeFile(filePath, block.trimStart(), "utf8");
@@ -1143,6 +1153,13 @@ export async function runSetupWizard(args: string[]): Promise<void> {
       contextPackChoice.toLowerCase() === "n" || contextPackChoice.toLowerCase() === "no"
     );
 
+    console.log("\nResponse Timing:");
+    console.log("  Show response time for tool calls (e.g., '✓ 3 results in 142ms').");
+    console.log("  Useful for debugging performance; disabled by default.");
+    const showTimingChoice = normalizeInput(await rl.question("Show response timing? [y/N]: "));
+    const showTiming =
+      showTimingChoice.toLowerCase() === "y" || showTimingChoice.toLowerCase() === "yes";
+
     const editors: EditorKey[] = [
       "codex",
       "claude",
@@ -1240,18 +1257,20 @@ export async function runSetupWizard(args: string[]): Promise<void> {
 
     // Build MCP server configs with selected toolset
     // v0.4.x: consolidated (~11 tools) is default, router (~2 tools) uses PROGRESSIVE_MODE
-    const mcpServer = buildContextStreamMcpServer({ apiUrl, apiKey, toolset, contextPackEnabled });
+    const mcpServer = buildContextStreamMcpServer({ apiUrl, apiKey, toolset, contextPackEnabled, showTiming });
     const mcpServerClaude = buildContextStreamMcpServer({
       apiUrl,
       apiKey,
       toolset,
       contextPackEnabled,
+      showTiming,
     });
     const vsCodeServer = buildContextStreamVsCodeServer({
       apiUrl,
       apiKey,
       toolset,
       contextPackEnabled,
+      showTiming,
     });
 
     // Global MCP config
@@ -1275,6 +1294,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
               apiKey,
               toolset,
               contextPackEnabled,
+              showTiming,
             });
             writeActions.push({ kind: "mcp-config", target: filePath, status });
             console.log(`- ${EDITOR_LABELS[editor]}: ${status} ${filePath}`);
@@ -1633,6 +1653,11 @@ export async function runSetupWizard(args: string[]): Promise<void> {
             workspace_id: workspaceId,
             workspace_name: workspaceName,
             create_parent_mapping: createParentMapping,
+            // Include version and config info for desktop app compatibility
+            version: VERSION,
+            configured_editors: configuredEditors,
+            context_pack: contextPackEnabled,
+            api_url: apiUrl,
           });
           writeActions.push({
             kind: "workspace-config",
@@ -1759,6 +1784,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
       console.log(`Toolset: ${toolset} (${toolsetDesc})`);
       console.log(`Token reduction: ~75% compared to previous versions.`);
       console.log(`Context Pack: ${contextPackEnabled ? "enabled" : "disabled"}`);
+      console.log(`Response Timing: ${showTiming ? "enabled" : "disabled"}`);
     }
 
     console.log("\nNext steps:");
@@ -1774,6 +1800,9 @@ export async function runSetupWizard(args: string[]): Promise<void> {
     }
     console.log(
       "- Toggle Context Pack with CONTEXTSTREAM_CONTEXT_PACK=true|false (and in dashboard settings)."
+    );
+    console.log(
+      "- Toggle Response Timing with CONTEXTSTREAM_SHOW_TIMING=true|false."
     );
 
     console.log("");
