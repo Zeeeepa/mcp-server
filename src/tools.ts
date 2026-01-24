@@ -7026,6 +7026,71 @@ This saves ~80% tokens compared to including full chat history.`,
         sessionManager.addTokens(input.user_message);
       }
 
+      // Post-compaction restoration: detect if compaction happened and restore snapshot
+      let postCompactContext = "";
+      let postCompactRestored = false;
+      if (sessionManager && sessionManager.shouldRestorePostCompact() && workspaceId) {
+        try {
+          // Fetch recent session_snapshot events
+          const listResult = await client.listMemoryEvents({
+            workspace_id: workspaceId,
+            project_id: projectId,
+            limit: 20,
+          });
+
+          const allEvents =
+            (listResult as any)?.data?.items ||
+            (listResult as any)?.items ||
+            (listResult as any)?.data ||
+            [];
+
+          // Find the most recent session_snapshot
+          const snapshotEvent = allEvents.find((e: any) =>
+            e.event_type === "session_snapshot" ||
+            e.metadata?.original_type === "session_snapshot" ||
+            e.tags?.includes("session_snapshot")
+          );
+
+          if (snapshotEvent && snapshotEvent.content) {
+            // Parse snapshot content
+            let snapshotData: Record<string, unknown>;
+            try {
+              snapshotData = JSON.parse(snapshotEvent.content);
+            } catch {
+              snapshotData = { conversation_summary: snapshotEvent.content };
+            }
+
+            // Build restoration context
+            const summary = snapshotData.conversation_summary || snapshotData.summary || "";
+            const decisions = snapshotData.key_decisions || [];
+            const unfinished = snapshotData.unfinished_work || snapshotData.pending_tasks || [];
+            const files = snapshotData.active_files || [];
+
+            const parts: string[] = [];
+            parts.push("📋 [POST-COMPACTION CONTEXT RESTORED]");
+            if (summary) parts.push(`Summary: ${summary}`);
+            if (Array.isArray(decisions) && decisions.length > 0) {
+              parts.push(`Decisions: ${decisions.slice(0, 5).join("; ")}`);
+            }
+            if (Array.isArray(unfinished) && unfinished.length > 0) {
+              parts.push(`Unfinished: ${unfinished.slice(0, 3).join("; ")}`);
+            }
+            if (Array.isArray(files) && files.length > 0) {
+              parts.push(`Active files: ${files.slice(0, 5).join(", ")}`);
+            }
+            parts.push("---");
+
+            postCompactContext = parts.join("\n") + "\n\n";
+            postCompactRestored = true;
+            sessionManager.markPostCompactRestoreCompleted();
+
+            console.error("[ContextStream] Post-compaction context restored automatically");
+          }
+        } catch (err) {
+          console.error("[ContextStream] Failed to restore post-compact context:", err);
+        }
+      }
+
       const result = await client.getSmartContext({
         user_message: input.user_message,
         workspace_id: workspaceId,
@@ -7135,10 +7200,18 @@ Action: Review each lesson and explain to the user how you will avoid these mist
       if (result.context_pressure) {
         const cp = result.context_pressure;
         if (cp.level === "critical") {
+          // Track high pressure for post-compaction detection
+          if (sessionManager) {
+            sessionManager.markHighContextPressure();
+          }
           contextPressureWarning = `\n\n🚨 [CONTEXT PRESSURE: CRITICAL] ${cp.usage_percent}% of context used (${cp.session_tokens}/${cp.threshold} tokens)
 Action: ${cp.suggested_action === "save_now" ? "SAVE STATE NOW - Call session(action=\"capture\") to preserve conversation state before compaction." : cp.suggested_action}
 The conversation may compact soon. Save important decisions, insights, and progress immediately.`;
         } else if (cp.level === "high") {
+          // Track high pressure for post-compaction detection
+          if (sessionManager) {
+            sessionManager.markHighContextPressure();
+          }
           contextPressureWarning = `\n\n⚠️ [CONTEXT PRESSURE: HIGH] ${cp.usage_percent}% of context used (${cp.session_tokens}/${cp.threshold} tokens)
 Action: ${cp.suggested_action === "prepare_save" ? "Consider saving important decisions and conversation state soon." : cp.suggested_action}`;
         }
@@ -7153,14 +7226,20 @@ Action: ${cp.suggested_action === "prepare_save" ? "Consider saving important de
         searchRulesLine,
       ].filter(Boolean).join("");
 
+      // Include post-compact context if restored
+      const finalContext = postCompactContext + result.context;
+      const enrichedResultWithRestore = postCompactRestored
+        ? { ...enrichedResult, post_compact_restored: true }
+        : enrichedResult;
+
       return {
         content: [
           {
             type: "text" as const,
-            text: result.context + footer + allWarnings,
+            text: finalContext + footer + allWarnings,
           },
         ],
-        structuredContent: toStructured(enrichedResult),
+        structuredContent: toStructured(enrichedResultWithRestore),
       };
     }
   );

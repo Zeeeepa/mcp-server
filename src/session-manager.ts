@@ -40,6 +40,12 @@ export class SessionManager {
   private checkpointEnabled =
     process.env.CONTEXTSTREAM_CHECKPOINT_ENABLED?.toLowerCase() === "true";
 
+  // Post-compaction restoration tracking
+  // Tracks when context pressure was high/critical so we can detect post-compaction state
+  private lastHighPressureAt: number | null = null;
+  private lastHighPressureTokens = 0;
+  private postCompactRestoreCompleted = false;
+
   constructor(
     private server: McpServer,
     private client: ContextStreamClient
@@ -182,6 +188,66 @@ export class SessionManager {
   resetTokenCount() {
     this.sessionTokens = 0;
     this.conversationTurns = 0;
+  }
+
+  /**
+   * Record that context pressure is high/critical.
+   * Called when context_smart returns high or critical pressure level.
+   */
+  markHighContextPressure() {
+    this.lastHighPressureAt = Date.now();
+    this.lastHighPressureTokens = this.getSessionTokens();
+  }
+
+  /**
+   * Check if we should attempt post-compaction restoration.
+   *
+   * Detection heuristic:
+   * 1. We recorded high/critical context pressure recently (within 10 minutes)
+   * 2. Current token count is very low (< 5000) compared to when pressure was high
+   * 3. We haven't already restored in this session
+   *
+   * This indicates compaction likely happened and we should restore context.
+   */
+  shouldRestorePostCompact(): boolean {
+    // Already restored
+    if (this.postCompactRestoreCompleted) {
+      return false;
+    }
+
+    // No high pressure recorded
+    if (!this.lastHighPressureAt) {
+      return false;
+    }
+
+    // High pressure was too long ago (> 10 minutes)
+    const elapsed = Date.now() - this.lastHighPressureAt;
+    if (elapsed > 10 * 60 * 1000) {
+      return false;
+    }
+
+    // Current tokens should be significantly lower than when pressure was high
+    // This indicates the context was compacted/reset
+    const currentTokens = this.getSessionTokens();
+    const tokenDrop = this.lastHighPressureTokens - currentTokens;
+
+    // Require at least 50% drop and current tokens < 10k
+    if (currentTokens > 10000 || tokenDrop < this.lastHighPressureTokens * 0.5) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Mark post-compaction restoration as completed.
+   * Prevents multiple restoration attempts in the same session.
+   */
+  markPostCompactRestoreCompleted() {
+    this.postCompactRestoreCompleted = true;
+    // Reset pressure tracking since we've restored
+    this.lastHighPressureAt = null;
+    this.lastHighPressureTokens = 0;
   }
 
   /**
