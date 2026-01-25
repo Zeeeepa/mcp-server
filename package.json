@@ -1,7 +1,7 @@
 {
   "name": "@contextstream/mcp-server",
   "mcpName": "io.github.contextstreamio/mcp-server",
-  "version": "0.4.41",
+  "version": "0.4.42",
   "description": "ContextStream MCP server - v0.4.x with consolidated domain tools (~11 tools, ~75% token reduction). Code context, memory, search, and AI tools.",
   "type": "module",
   "license": "MIT",
@@ -25,7 +25,8 @@
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "format": "prettier --write src/",
-    "format:check": "prettier --check src/"
+    "format:check": "prettier --check src/",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
