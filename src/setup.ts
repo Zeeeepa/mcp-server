@@ -1827,11 +1827,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
     );
 
     console.log("");
-    console.log("You're set up! Now try these prompts in your AI tool:");
-    console.log('  1) "session summary"');
-    console.log('  2) "remember we\'re using PostgreSQL"');
-    console.log('  3) "what did we decide about auth?"');
-    console.log("");
+    console.log("You're all set! ContextStream gives your AI persistent memory, semantic code search, and cross-session context.");
     console.log("More at: https://contextstream.io/docs/mcp");
   } finally {
     rl.close();
