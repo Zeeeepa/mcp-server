@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.43
+
+**Enhanced Context warnings and Notion reliability improvements.**
+
+This release adds support for server-side Enhanced Context warnings and fixes a common Notion integration issue.
+
+### What's New
+
+- **Enhanced Context Warnings** — `context_smart` now surfaces server-side warnings for lessons, risky actions, and breaking changes. When the API detects relevant lessons or risky operations (like migrations or deployments), warnings are automatically included in the response and displayed with ⚠️ prefixes. This is part of the new Enhanced Context feature for Pro+ users.
+
+- **Notion Database ID Validation** — Fixed a common issue where AI agents would use stale database IDs from memory, causing 404 errors. The `notion_create_page` tool now clearly warns that you must call `list_databases` first to get valid IDs. This prevents the frustrating "database not found" errors.
+
+### Upgrading
+
+```bash
+npm install -g @contextstream/mcp-server@latest
+```
+
+---
+
 ## 0.4.42
 
 **Streamlined setup wizard and cleaner output.**
