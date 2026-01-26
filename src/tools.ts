@@ -7904,6 +7904,8 @@ Returns: the created page ID, URL, title, and timestamps.
 Use this to save notes, documentation, or any content to Notion.
 Supports Markdown content which is automatically converted to Notion blocks.
 
+IMPORTANT: If using parent_database_id, you MUST call integration(provider="notion", action="list_databases") FIRST to get valid database IDs. Do NOT use database IDs from memory or previous conversations - they may be stale or inaccessible.
+
 Example prompts:
 - "Create a Notion page with today's meeting notes"
 - "Save this documentation to Notion"
@@ -7913,7 +7915,7 @@ Example prompts:
         project_id: z.string().uuid().optional().describe("Project ID (uses session default if not provided). If provided, the memory event will be scoped to this project."),
         title: z.string().describe("Page title"),
         content: z.string().optional().describe("Page content in Markdown format"),
-        parent_database_id: z.string().optional().describe("Parent database ID to create page in"),
+        parent_database_id: z.string().optional().describe("Parent database ID. MUST call integration(provider='notion', action='list_databases') first to get valid IDs - do NOT use IDs from memory"),
         parent_page_id: z.string().optional().describe("Parent page ID to create page under"),
       }),
     },
@@ -10377,7 +10379,7 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
           title: z.string().optional().describe("Page/database title (for Notion create_page/update_page/create_database)"),
           content: z.string().optional().describe("Page content in Markdown (for Notion create_page/update_page)"),
           description: z.string().optional().describe("Database description (for Notion create_database)"),
-          parent_database_id: z.string().optional().describe("Parent database ID (for Notion create_page)"),
+          parent_database_id: z.string().optional().describe("Parent database ID (for Notion create_page). MUST call list_databases first - do NOT use IDs from memory"),
           parent_page_id: z.string().optional().describe("Parent page ID (for Notion create_page/create_database)"),
           page_id: z.string().optional().describe("Page ID (for Notion get_page/update_page)"),
           database_id: z.string().optional().describe("Database ID (for Notion query_database/search_pages/activity)"),
