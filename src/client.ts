@@ -1505,6 +1505,11 @@ export class ContextStreamClient {
        * workspace-level context but no project-specific context.
        */
       skip_project_creation?: boolean;
+      /**
+       * Editor/client name for analytics (e.g., "cursor", "claude-code", "windsurf").
+       * Passed to the backend for usage tracking.
+       */
+      client_name?: string;
     },
     ideRoots: string[] = []
   ) {
@@ -1885,6 +1890,7 @@ export class ContextStreamClient {
           context_hint: params.context_hint,
           include_recent_memory: params.include_recent_memory !== false,
           include_decisions: params.include_decisions !== false,
+          client_name: params.client_name,
         });
 
         // Merge batched response into context
@@ -2064,6 +2070,7 @@ export class ContextStreamClient {
     context_hint?: string;
     include_recent_memory?: boolean;
     include_decisions?: boolean;
+    client_name?: string;
   }): Promise<{
     workspace?: { id: string; name: string; description?: string };
     project?: { id: string; name: string; description?: string };
@@ -2096,6 +2103,7 @@ export class ContextStreamClient {
         include_recent_memory: params.include_recent_memory ?? true,
         include_decisions: params.include_decisions ?? true,
         client_version: VERSION,
+        client_name: params.client_name,
       },
     })) as { data?: SessionContextData } | SessionContextData;
 

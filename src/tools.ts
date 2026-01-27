@@ -1469,6 +1469,14 @@ function getRecommendedToolset(
 let detectedClientInfo: { name?: string; version?: string } | null = null;
 let clientDetectedFromEnv = false;
 
+/**
+ * Get the detected MCP client name (e.g., "cursor", "claude-code", "windsurf").
+ * Returns null if no client has been detected yet.
+ */
+export function getDetectedClientName(): string | null {
+  return detectedClientInfo?.name || null;
+}
+
 // ============================================
 // END CLIENT DETECTION
 // ============================================
@@ -4869,7 +4877,12 @@ This does semantic search on the first message. You only need context_smart on s
         ideRoots = [input.folder_path];
       }
 
-      const result = (await client.initSession(input, ideRoots)) as Record<string, unknown>;
+      // Pass detected client name for analytics tracking
+      const clientName = getDetectedClientName();
+      const result = (await client.initSession(
+        { ...input, client_name: clientName || undefined },
+        ideRoots
+      )) as Record<string, unknown>;
 
       // Add compact tool reference to help AI know available tools
       result.tools_hint = getCoreToolsHint();
