@@ -46,6 +46,43 @@ function applyMcpToolPrefix(markdown: string, toolPrefix: string): string {
   return markdown.replace(toolRegex, `${toolPrefix}$1`);
 }
 
+/**
+ * Dynamic rules - minimal file that relies on context_smart for dynamic rule delivery.
+ * This is the recommended mode for efficiency and better results.
+ */
+const CONTEXTSTREAM_RULES_DYNAMIC = `
+## ContextStream Dynamic Rules (Powered by our SmartRouter)
+
+All rules are served dynamically via \`context_smart\`. This file is minimal by design.
+
+### Every Message Protocol
+
+| Message | What to Call |
+|---------|--------------|
+| **1st message** | \`session_init(folder_path="<cwd>", context_hint="<msg>")\` then \`context_smart(user_message="<msg>")\` |
+| **2nd+ messages** | \`context_smart(user_message="<msg>")\` |
+
+### Follow the Instructions Field
+
+The \`context_smart\` response includes an \`instructions\` field with context-aware guidance.
+**Follow these instructions.** They are dynamically matched to your query and include:
+- Search guidance (when/how to search)
+- Git workflow rules (commit, PR, safety)
+- Planning rules (use ContextStream plans, not file-based)
+- Media/code analysis guidance
+- Lessons from past mistakes
+- And more...
+
+### Notices
+
+Handle notices from \`context_smart\` response:
+- **[VERSION_NOTICE]**: Tell user to update MCP
+- **[RULES_NOTICE]**: Run \`generate_rules()\`
+- **[LESSONS_WARNING]**: Apply lessons immediately
+
+Rules Version: ${RULES_VERSION}
+`.trim();
+
 const CONTEXTSTREAM_RULES_FULL = `
 ## ContextStream Rules
 
@@ -730,14 +767,18 @@ export function generateRuleContent(
     workspaceId?: string;
     projectName?: string;
     additionalRules?: string;
-    mode?: "minimal" | "full";
+    mode?: "dynamic" | "minimal" | "full";
   }
 ): { filename: string; content: string } | null {
   const template = getTemplate(editor);
   if (!template) return null;
 
-  const mode = options?.mode || "minimal";
-  const rules = mode === "full" ? CONTEXTSTREAM_RULES_FULL : CONTEXTSTREAM_RULES_MINIMAL;
+  const mode = options?.mode || "dynamic";
+  const rules = mode === "full" 
+    ? CONTEXTSTREAM_RULES_FULL 
+    : mode === "minimal" 
+      ? CONTEXTSTREAM_RULES_MINIMAL 
+      : CONTEXTSTREAM_RULES_DYNAMIC;
 
   let content = template.build(rules);
 
@@ -777,7 +818,7 @@ export function generateAllRuleFiles(options?: {
   workspaceId?: string;
   projectName?: string;
   additionalRules?: string;
-  mode?: "minimal" | "full";
+  mode?: "dynamic" | "minimal" | "full";
 }): Array<{ editor: string; filename: string; content: string }> {
   return getAvailableEditors()
     .map((editor) => {

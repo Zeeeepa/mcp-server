@@ -212,6 +212,83 @@ if __name__ == "__main__":
 `;
 
 /**
+ * Media-aware hook that detects media-related prompts and injects tool guidance.
+ * Triggers on patterns like: video, clips, Remotion, image, audio, etc.
+ */
+export const MEDIA_AWARE_HOOK_SCRIPT = `#!/usr/bin/env python3
+"""
+ContextStream Media-Aware Hook for Claude Code
+
+Detects media-related prompts and injects context about the media tool.
+"""
+
+import json
+import sys
+import os
+import re
+
+ENABLED = os.environ.get("CONTEXTSTREAM_MEDIA_HOOK_ENABLED", "true").lower() == "true"
+
+# Media patterns (case-insensitive)
+PATTERNS = [
+    r"\\b(video|videos|clip|clips|footage|keyframe)s?\\b",
+    r"\\b(remotion|timeline|video\\s*edit)\\b",
+    r"\\b(image|images|photo|photos|picture|thumbnail)s?\\b",
+    r"\\b(audio|podcast|transcript|transcription|voice)\\b",
+    r"\\b(media|asset|assets|creative|b-roll)\\b",
+    r"\\b(find|search|show).*(clip|video|image|audio|footage|media)\\b",
+]
+
+COMPILED = [re.compile(p, re.IGNORECASE) for p in PATTERNS]
+
+MEDIA_CONTEXT = """[MEDIA TOOLS AVAILABLE]
+Your workspace may have indexed media. Use ContextStream media tools:
+
+- **Search**: \`mcp__contextstream__media(action="search", query="description")\`
+- **Get clip**: \`mcp__contextstream__media(action="get_clip", content_id="...", start="1:34", end="2:15", output_format="remotion|ffmpeg|raw")\`
+- **List assets**: \`mcp__contextstream__media(action="list")\`
+- **Index**: \`mcp__contextstream__media(action="index", file_path="...", content_type="video|audio|image|document")\`
+
+For Remotion: use \`output_format="remotion"\` to get frame-based props.
+[END MEDIA TOOLS]"""
+
+def matches(text):
+    return any(p.search(text) for p in COMPILED)
+
+def main():
+    if not ENABLED:
+        sys.exit(0)
+
+    try:
+        data = json.load(sys.stdin)
+    except:
+        sys.exit(0)
+
+    prompt = data.get("prompt", "")
+    if not prompt:
+        session = data.get("session", {})
+        for msg in reversed(session.get("messages", [])):
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                prompt = content if isinstance(content, str) else ""
+                if isinstance(content, list):
+                    for b in content:
+                        if isinstance(b, dict) and b.get("type") == "text":
+                            prompt = b.get("text", "")
+                            break
+                break
+
+    if not prompt or not matches(prompt):
+        sys.exit(0)
+
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": MEDIA_CONTEXT}}))
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+`;
+
+/**
  * The PreCompact hook script that saves conversation state before compaction.
  * This runs before Claude Code compacts the context (either manual /compact or auto).
  */
@@ -469,11 +546,41 @@ export function getHooksDir(): string {
  */
 export function buildHooksConfig(options?: {
   includePreCompact?: boolean;
+  includeMediaAware?: boolean;
 }): ClaudeHooksConfig["hooks"] {
   const hooksDir = getHooksDir();
   const preToolUsePath = path.join(hooksDir, "contextstream-redirect.py");
   const userPromptPath = path.join(hooksDir, "contextstream-reminder.py");
   const preCompactPath = path.join(hooksDir, "contextstream-precompact.py");
+  const mediaAwarePath = path.join(hooksDir, "contextstream-media-aware.py");
+
+  // Build UserPromptSubmit hooks array - always include reminder
+  const userPromptHooks: ClaudeHookMatcher[] = [
+    {
+      matcher: "*",
+      hooks: [
+        {
+          type: "command",
+          command: `python3 "${userPromptPath}"`,
+          timeout: 5,
+        },
+      ],
+    },
+  ];
+
+  // Add media-aware hook (enabled by default for creative workflows)
+  if (options?.includeMediaAware !== false) {
+    userPromptHooks.push({
+      matcher: "*",
+      hooks: [
+        {
+          type: "command",
+          command: `python3 "${mediaAwarePath}"`,
+          timeout: 5,
+        },
+      ],
+    });
+  }
 
   const config: ClaudeHooksConfig["hooks"] = {
     PreToolUse: [
@@ -488,18 +595,7 @@ export function buildHooksConfig(options?: {
         ],
       },
     ],
-    UserPromptSubmit: [
-      {
-        matcher: "*",
-        hooks: [
-          {
-            type: "command",
-            command: `python3 "${userPromptPath}"`,
-            timeout: 5,
-          },
-        ],
-      },
-    ],
+    UserPromptSubmit: userPromptHooks,
   };
 
   // Add PreCompact hook for context compaction awareness (opt-in)
@@ -527,18 +623,20 @@ export function buildHooksConfig(options?: {
  */
 export async function installHookScripts(options?: {
   includePreCompact?: boolean;
-}): Promise<{ preToolUse: string; userPrompt: string; preCompact?: string }> {
+  includeMediaAware?: boolean;
+}): Promise<{ preToolUse: string; userPrompt: string; preCompact?: string; mediaAware?: string }> {
   const hooksDir = getHooksDir();
   await fs.mkdir(hooksDir, { recursive: true });
 
   const preToolUsePath = path.join(hooksDir, "contextstream-redirect.py");
   const userPromptPath = path.join(hooksDir, "contextstream-reminder.py");
   const preCompactPath = path.join(hooksDir, "contextstream-precompact.py");
+  const mediaAwarePath = path.join(hooksDir, "contextstream-media-aware.py");
 
   await fs.writeFile(preToolUsePath, PRETOOLUSE_HOOK_SCRIPT, { mode: 0o755 });
   await fs.writeFile(userPromptPath, USER_PROMPT_HOOK_SCRIPT, { mode: 0o755 });
 
-  const result: { preToolUse: string; userPrompt: string; preCompact?: string } = {
+  const result: { preToolUse: string; userPrompt: string; preCompact?: string; mediaAware?: string } = {
     preToolUse: preToolUsePath,
     userPrompt: userPromptPath,
   };
@@ -547,6 +645,12 @@ export async function installHookScripts(options?: {
   if (options?.includePreCompact) {
     await fs.writeFile(preCompactPath, PRECOMPACT_HOOK_SCRIPT, { mode: 0o755 });
     result.preCompact = preCompactPath;
+  }
+
+  // Install Media-Aware hook script (enabled by default for creative workflows)
+  if (options?.includeMediaAware !== false) {
+    await fs.writeFile(mediaAwarePath, MEDIA_AWARE_HOOK_SCRIPT, { mode: 0o755 });
+    result.mediaAware = mediaAwarePath;
   }
 
   return result;
@@ -620,15 +724,22 @@ export async function installClaudeCodeHooks(options: {
   projectPath?: string;
   dryRun?: boolean;
   includePreCompact?: boolean;
+  includeMediaAware?: boolean;
 }): Promise<{ scripts: string[]; settings: string[] }> {
   const result = { scripts: [] as string[], settings: [] as string[] };
 
   // Install hook scripts
   if (!options.dryRun) {
-    const scripts = await installHookScripts({ includePreCompact: options.includePreCompact });
+    const scripts = await installHookScripts({
+      includePreCompact: options.includePreCompact,
+      includeMediaAware: options.includeMediaAware
+    });
     result.scripts.push(scripts.preToolUse, scripts.userPrompt);
     if (scripts.preCompact) {
       result.scripts.push(scripts.preCompact);
+    }
+    if (scripts.mediaAware) {
+      result.scripts.push(scripts.mediaAware);
     }
   } else {
     const hooksDir = getHooksDir();
@@ -639,9 +750,15 @@ export async function installClaudeCodeHooks(options: {
     if (options.includePreCompact) {
       result.scripts.push(path.join(hooksDir, "contextstream-precompact.py"));
     }
+    if (options.includeMediaAware !== false) {
+      result.scripts.push(path.join(hooksDir, "contextstream-media-aware.py"));
+    }
   }
 
-  const hooksConfig = buildHooksConfig({ includePreCompact: options.includePreCompact });
+  const hooksConfig = buildHooksConfig({
+    includePreCompact: options.includePreCompact,
+    includeMediaAware: options.includeMediaAware
+  });
 
   // Update user settings
   if (options.scope === "user" || options.scope === "both") {
@@ -688,6 +805,17 @@ ContextStream installs hooks to help enforce ContextStream-first behavior:
 - **Purpose:** Injects a reminder about ContextStream rules on every message
 - **Disable:** Set \`CONTEXTSTREAM_REMINDER_ENABLED=false\` environment variable
 
+### Media-Aware Hook
+- **File:** \`~/.claude/hooks/contextstream-media-aware.py\`
+- **Purpose:** Detects media-related prompts and injects media tool guidance
+- **Triggers:** Patterns like video, clips, Remotion, image, audio, creative assets
+- **Disable:** Set \`CONTEXTSTREAM_MEDIA_HOOK_ENABLED=false\` environment variable
+
+When Media-Aware hook detects media patterns, it injects context about:
+- How to search indexed media assets
+- How to get clips for Remotion (with frame-based props)
+- How to index new media files
+
 ### PreCompact Hook (Optional)
 - **File:** \`~/.claude/hooks/contextstream-precompact.py\`
 - **Purpose:** Saves conversation state before context compaction
@@ -718,10 +846,16 @@ If you prefer to configure manually, add to \`~/.claude/settings.json\`:
       "matcher": "Glob|Grep|Search|Task|EnterPlanMode",
       "hooks": [{"type": "command", "command": "python3 ~/.claude/hooks/contextstream-redirect.py"}]
     }],
-    "UserPromptSubmit": [{
-      "matcher": "*",
-      "hooks": [{"type": "command", "command": "python3 ~/.claude/hooks/contextstream-reminder.py"}]
-    }],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [{"type": "command", "command": "python3 ~/.claude/hooks/contextstream-reminder.py"}]
+      },
+      {
+        "matcher": "*",
+        "hooks": [{"type": "command", "command": "python3 ~/.claude/hooks/contextstream-media-aware.py"}]
+      }
+    ],
     "PreCompact": [{
       "matcher": "*",
       "hooks": [{"type": "command", "command": "python3 ~/.claude/hooks/contextstream-precompact.py", "timeout": 10}]

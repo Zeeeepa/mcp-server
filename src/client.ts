@@ -52,6 +52,22 @@ function normalizeNodeType(input: string): string {
 
 type GraphTier = "none" | "lite" | "full";
 
+/**
+ * Semantic intent classification from SmartRouter
+ * Provides intent type, risk level, and capture suggestions
+ */
+interface SemanticIntent {
+  intent_type: string;
+  risk_level: "none" | "low" | "medium" | "high" | "critical";
+  confidence: number;
+  decision_detected: boolean;
+  capture_worthy: boolean;
+  suggested_capture_type?: string;
+  suggested_capture_title?: string;
+  extracted_entities?: string[];
+  explanation?: string;
+}
+
 function pickString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -3086,6 +3102,8 @@ export class ContextStreamClient {
       threshold_warning: boolean;
       suggested_action: "none" | "prepare_save" | "save_now";
     };
+    /** Semantic intent classification from SmartRouter (Pro+ tiers) */
+    semantic_intent?: SemanticIntent;
   }> {
     const withDefaults = this.withDefaults(params);
     const maxTokens = params.max_tokens || 800;
@@ -3212,6 +3230,7 @@ export class ContextStreamClient {
         ...(Array.isArray(data?.warnings) && data.warnings.length > 0 ? { warnings: data.warnings } : {}),
         ...(this.indexRefreshInProgress ? { index_status: "refreshing" as const } : {}),
         ...(data?.context_pressure ? { context_pressure: data.context_pressure } : {}),
+        ...(data?.semantic_intent ? { semantic_intent: data.semantic_intent } : {}),
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -5066,5 +5085,269 @@ export class ContextStreamClient {
   async deleteTask(params: { task_id: string }) {
     uuidSchema.parse(params.task_id);
     return request(this.config, `/tasks/${params.task_id}`, { method: "DELETE" });
+  }
+
+  // ============================================================================
+  // Media/Content Methods (for video, audio, image indexing)
+  // ============================================================================
+
+  /**
+   * Initialize a media upload and get a presigned URL.
+   * After calling this, upload the file to the returned upload_url with the specified headers.
+   */
+  async mediaInitUpload(params: {
+    workspace_id?: string;
+    filename: string;
+    size_bytes: number;
+    content_type: "video" | "audio" | "image" | "document" | "text" | "code" | "other";
+    mime_type?: string;
+    title?: string;
+    tags?: string[];
+  }): Promise<{
+    content_id: string;
+    upload_url: string;
+    headers: Record<string, string>;
+    expires_in_seconds: number;
+  }> {
+    const withDefaults = this.withDefaults(params);
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for media upload");
+    }
+    const body = {
+      filename: params.filename,
+      size_bytes: params.size_bytes,
+      content_type: params.content_type.toLowerCase(), // Backend uses snake_case (lowercase)
+      mime_type: params.mime_type,
+      title: params.title,
+      tags: params.tags || [],
+    };
+    const result = await request(
+      this.config,
+      `/workspaces/${withDefaults.workspace_id}/content/uploads/init`,
+      { method: "POST", body }
+    );
+    return unwrapApiResponse(result);
+  }
+
+  /**
+   * Complete a media upload and trigger indexing.
+   * Call this after successfully uploading the file to the presigned URL.
+   */
+  async mediaCompleteUpload(params: {
+    workspace_id?: string;
+    content_id: string;
+  }): Promise<{
+    id: string;
+    workspace_id: string;
+    content_type: string;
+    filename: string;
+    size_bytes: number;
+    mime_type?: string;
+    title?: string;
+    tags: string[];
+    status: string;
+    created_at: string;
+    updated_at: string;
+  }> {
+    const withDefaults = this.withDefaults(params);
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required to complete upload");
+    }
+    uuidSchema.parse(params.content_id);
+    const result = await request(
+      this.config,
+      `/workspaces/${withDefaults.workspace_id}/content/${params.content_id}/complete-upload`,
+      { method: "POST" }
+    );
+    return unwrapApiResponse(result);
+  }
+
+  /**
+   * Get the status of a content item (for checking indexing progress).
+   */
+  async mediaGetContent(params: {
+    workspace_id?: string;
+    content_id: string;
+  }): Promise<{
+    id: string;
+    workspace_id: string;
+    content_type: string;
+    filename: string;
+    size_bytes: number;
+    mime_type?: string;
+    title?: string;
+    tags: string[];
+    status: string;
+    created_at: string;
+    updated_at: string;
+    indexing_progress?: number;
+    indexing_error?: string;
+    metadata?: Record<string, unknown>;
+  }> {
+    const withDefaults = this.withDefaults(params);
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for getting content");
+    }
+    uuidSchema.parse(params.content_id);
+    const result = await request(
+      this.config,
+      `/workspaces/${withDefaults.workspace_id}/content/${params.content_id}`,
+      { method: "GET" }
+    );
+    return unwrapApiResponse(result);
+  }
+
+  /**
+   * List content items in a workspace.
+   */
+  async mediaListContent(params: {
+    workspace_id?: string;
+    content_type?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    items: Array<{
+      id: string;
+      workspace_id: string;
+      content_type: string;
+      filename: string;
+      size_bytes: number;
+      mime_type?: string;
+      title?: string;
+      tags: string[];
+      status: string;
+      created_at: string;
+      updated_at: string;
+    }>;
+    total: number;
+    limit: number;
+    offset: number;
+  }> {
+    const withDefaults = this.withDefaults(params || {});
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for listing content");
+    }
+    const query = new URLSearchParams();
+    if (params?.content_type) query.set("content_type", params.content_type);
+    if (params?.status) query.set("status", params.status);
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.offset) query.set("offset", String(params.offset));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    const result = await request(
+      this.config,
+      `/workspaces/${withDefaults.workspace_id}/content${suffix}`,
+      { method: "GET" }
+    );
+    return unwrapApiResponse(result);
+  }
+
+  /**
+   * Search content by semantic query (transcripts, descriptions, etc.).
+   */
+  async mediaSearchContent(params: {
+    workspace_id?: string;
+    query: string;
+    content_type?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    results: Array<{
+      content_id: string;
+      filename: string;
+      content_type: string;
+      title?: string;
+      score: number;
+      match_type: string;
+      match_text?: string;
+      timestamp_start?: number;
+      timestamp_end?: number;
+    }>;
+    total: number;
+  }> {
+    const withDefaults = this.withDefaults(params);
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for searching content");
+    }
+    const query = new URLSearchParams();
+    query.set("q", params.query);
+    if (params.content_type) query.set("content_type", params.content_type);
+    if (params.limit) query.set("limit", String(params.limit));
+    if (params.offset) query.set("offset", String(params.offset));
+    const result = await request(
+      this.config,
+      `/workspaces/${withDefaults.workspace_id}/content/search?${query.toString()}`,
+      { method: "GET" }
+    );
+    return unwrapApiResponse(result);
+  }
+
+  /**
+   * Get a specific clip/segment from indexed content.
+   */
+  async mediaGetClip(params: {
+    workspace_id?: string;
+    content_id: string;
+    start_time?: number;
+    end_time?: number;
+    format?: "json" | "remotion" | "ffmpeg";
+  }): Promise<{
+    content_id: string;
+    filename: string;
+    content_type: string;
+    clip: {
+      start_time: number;
+      end_time: number;
+      transcript?: string;
+      keyframes?: Array<{ timestamp: number; url: string; description?: string }>;
+      metadata?: Record<string, unknown>;
+    };
+    // Remotion-specific output
+    remotion_props?: {
+      src: string;
+      durationInFrames: number;
+      fps: number;
+      startFrom?: number;
+      endAt?: number;
+    };
+    // FFmpeg-specific output
+    ffmpeg_command?: string;
+  }> {
+    const withDefaults = this.withDefaults(params);
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for getting clips");
+    }
+    uuidSchema.parse(params.content_id);
+    const query = new URLSearchParams();
+    if (params.start_time !== undefined) query.set("start_time", String(params.start_time));
+    if (params.end_time !== undefined) query.set("end_time", String(params.end_time));
+    if (params.format) query.set("format", params.format);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    const result = await request(
+      this.config,
+      `/workspaces/${withDefaults.workspace_id}/content/${params.content_id}/clip${suffix}`,
+      { method: "GET" }
+    );
+    return unwrapApiResponse(result);
+  }
+
+  /**
+   * Delete a content item.
+   */
+  async mediaDeleteContent(params: {
+    workspace_id?: string;
+    content_id: string;
+  }): Promise<{ deleted: boolean }> {
+    const withDefaults = this.withDefaults(params);
+    if (!withDefaults.workspace_id) {
+      throw new Error("workspace_id is required for deleting content");
+    }
+    uuidSchema.parse(params.content_id);
+    const result = await request(
+      this.config,
+      `/workspaces/${withDefaults.workspace_id}/content/${params.content_id}`,
+      { method: "DELETE" }
+    );
+    return unwrapApiResponse(result);
   }
 }

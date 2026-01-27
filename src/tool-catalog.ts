@@ -96,6 +96,17 @@ export const TOOL_CATALOG: ToolCategory[] = [
     ],
   },
   {
+    name: "Media",
+    tools: [
+      { name: "index", hint: "add-media" },
+      { name: "status", hint: "progress" },
+      { name: "search", hint: "find-clip" },
+      { name: "get_clip", hint: "get-segment" },
+      { name: "list", hint: "browse" },
+      { name: "delete", hint: "remove" },
+    ],
+  },
+  {
     name: "Workspace",
     tools: [
       { name: "list", hint: "" },

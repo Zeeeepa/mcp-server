@@ -22,7 +22,7 @@ import {
   type SupportedEditor,
 } from "./hooks-config.js";
 
-type RuleMode = "minimal" | "full";
+type RuleMode = "dynamic" | "minimal" | "full";
 type Toolset = "consolidated" | "router";
 type InstallScope = "global" | "project" | "both";
 type McpScope = InstallScope | "skip";
@@ -791,6 +791,7 @@ function buildClientConfig(params: { apiUrl: string; apiKey?: string; jwt?: stri
     defaultProjectId: undefined,
     userAgent: `contextstream-mcp/setup/${VERSION}`,
     contextPackEnabled: true,
+    showTiming: false,
   };
 }
 
@@ -799,7 +800,7 @@ export async function runSetupWizard(args: string[]): Promise<void> {
   const rl = createInterface({ input: stdin, output: stdout });
 
   const writeActions: Array<{
-    kind: "rules" | "workspace-config" | "mcp-config";
+    kind: "rules" | "workspace-config" | "mcp-config" | "hooks";
     target: string;
     status: string;
   }> = [];
@@ -1115,8 +1116,16 @@ export async function runSetupWizard(args: string[]): Promise<void> {
       }
     }
 
-    // Rules mode - always use enhanced (full) mode
-    const mode: RuleMode = "full";
+    // Rules mode selection
+    console.log("\nRules mode (how rules are delivered to the AI):");
+    console.log("  1) Dynamic (recommended) — minimal rules file, context_smart delivers rules dynamically");
+    console.log("     Best for: efficiency, better results, rules always up-to-date");
+    console.log("     The rules file just tells the AI to call session_init + context_smart");
+    console.log("  2) Full — complete rules embedded in file");
+    console.log("     Best for: offline use, debugging, or if you prefer static rules");
+    console.log("");
+    const ruleModeChoice = normalizeInput(await rl.question("Choose [1/2] (default 1): ")) || "1";
+    const mode: RuleMode = ruleModeChoice === "2" ? "full" : "dynamic";
 
     const detectedPlanName = await client.getPlanName();
     const detectedGraphTier = await client.getGraphTier();

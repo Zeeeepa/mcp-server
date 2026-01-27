@@ -52,6 +52,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   search: "search",
   memory: "memory",
   graph: "graph",
+  media: "media",
   ai: "ai",
   generate_rules: "rules",
   generate_editor_rules: "rules",
@@ -1859,6 +1860,7 @@ const CONSOLIDATED_TOOLS = new Set<string>([
   "workspace", // Consolidates workspaces_list, workspace_associate, etc.
   "reminder", // Consolidates reminders_list, reminders_create, etc.
   "integration", // Consolidates slack_*, github_*, notion_*, integrations_*
+  "media", // Consolidates media indexing, search, and clip retrieval for Remotion/FFmpeg
   "help", // Consolidates session_tools, auth_me, mcp_server_version, etc.
 ]);
 
@@ -10846,6 +10848,473 @@ Output formats: full (default, includes content), paths (file paths only - 80% t
               ],
               structuredContent: toStructured(updatedPage),
             };
+          }
+
+          default:
+            return errorResult(`Unknown action: ${input.action}`);
+        }
+      }
+    );
+
+    // -------------------------------------------------------------------------
+    // media - Consolidates media indexing, search, and clip retrieval
+    // -------------------------------------------------------------------------
+    registerTool(
+      "media",
+      {
+        title: "Media",
+        description: `Media operations for video/audio/image assets. Enables AI agents to index, search, and retrieve media with semantic understanding - solving the "LLM as video editor has no context" problem for tools like Remotion.
+
+Actions:
+- index: Index a local media file or external URL. Triggers ML processing (Whisper transcription, CLIP embeddings, keyframe extraction).
+- status: Check indexing progress for a content_id. Returns transcript_available, keyframe_count, duration.
+- search: Semantic search across indexed media. Returns timestamps, transcript excerpts, keyframe URLs.
+- get_clip: Get clip details for a time range. Supports output_format: remotion (frame-based props), ffmpeg (timecodes), raw.
+- list: List indexed media assets.
+- delete: Remove a media asset from the index.
+
+Example workflow:
+1. media(action="index", file_path="/path/to/video.mp4") → get content_id
+2. media(action="status", content_id="...") → wait for indexed
+3. media(action="search", query="where John explains authentication") → get timestamps
+4. media(action="get_clip", content_id="...", start="1:34", end="2:15", output_format="remotion") → get Remotion props`,
+        inputSchema: z.object({
+          action: z
+            .enum(["index", "status", "search", "get_clip", "list", "delete"])
+            .describe("Action to perform"),
+          workspace_id: z.string().uuid().optional(),
+          project_id: z.string().uuid().optional(),
+          // Index params
+          file_path: z.string().optional().describe("Local path to media file for indexing"),
+          external_url: z.string().url().optional().describe("External URL to media file for indexing"),
+          content_type: z
+            .enum(["video", "audio", "image", "document"])
+            .optional()
+            .describe("Type of media content (auto-detected if not provided)"),
+          // Status/get_clip/delete params
+          content_id: z.string().uuid().optional().describe("Content ID from index operation"),
+          // Search params
+          query: z.string().optional().describe("Semantic search query for media content"),
+          content_types: z
+            .array(z.enum(["video", "audio", "image", "document"]))
+            .optional()
+            .describe("Filter search to specific content types"),
+          // Get clip params
+          start: z
+            .string()
+            .optional()
+            .describe('Start time for clip. Formats: "1:34", "94s", or seconds as string'),
+          end: z
+            .string()
+            .optional()
+            .describe('End time for clip. Formats: "2:15", "135s", or seconds as string'),
+          output_format: z
+            .enum(["remotion", "ffmpeg", "raw"])
+            .optional()
+            .describe(
+              "Output format: remotion (frame-based props for Video component), ffmpeg (timecodes), raw (seconds)"
+            ),
+          fps: z.number().optional().describe("Frames per second for remotion format (default: 30)"),
+          // Common params
+          tags: z.array(z.string()).optional().describe("Tags to associate with media"),
+          limit: z.number().optional().describe("Maximum results to return"),
+        }),
+      },
+      async (input) => {
+        const workspaceId = resolveWorkspaceId(input.workspace_id);
+        const projectId = resolveProjectId(input.project_id);
+
+        switch (input.action) {
+          case "index": {
+            if (!input.file_path && !input.external_url) {
+              return errorResult("index requires: file_path or external_url");
+            }
+            if (!workspaceId) {
+              return errorResult(
+                "Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly."
+              );
+            }
+
+            // Handle local file upload
+            if (input.file_path) {
+              const fs = await import("fs/promises");
+              const pathModule = await import("path");
+              const filePath = input.file_path.startsWith("~")
+                ? input.file_path.replace("~", process.env.HOME || "")
+                : input.file_path;
+              const resolvedPath = pathModule.resolve(filePath);
+
+              // Check file exists and get stats
+              let fileStats;
+              try {
+                fileStats = await fs.stat(resolvedPath);
+              } catch {
+                return errorResult(`File not found: ${resolvedPath}`);
+              }
+
+              if (!fileStats.isFile()) {
+                return errorResult(`Not a file: ${resolvedPath}`);
+              }
+
+              // Determine MIME type from extension
+              const ext = pathModule.extname(resolvedPath).toLowerCase();
+              const mimeTypes: Record<string, string> = {
+                ".mp4": "video/mp4",
+                ".webm": "video/webm",
+                ".mov": "video/quicktime",
+                ".avi": "video/x-msvideo",
+                ".mkv": "video/x-matroska",
+                ".mp3": "audio/mpeg",
+                ".wav": "audio/wav",
+                ".ogg": "audio/ogg",
+                ".flac": "audio/flac",
+                ".m4a": "audio/mp4",
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".gif": "image/gif",
+                ".webp": "image/webp",
+                ".svg": "image/svg+xml",
+              };
+              const mimeType = mimeTypes[ext] || "application/octet-stream";
+
+              // Auto-detect content type from extension
+              let contentType: "video" | "audio" | "image" | "document" | "text" | "code" | "other" = "other";
+              if (input.content_type) {
+                contentType = input.content_type as typeof contentType;
+              } else if (mimeType.startsWith("video/")) {
+                contentType = "video";
+              } else if (mimeType.startsWith("audio/")) {
+                contentType = "audio";
+              } else if (mimeType.startsWith("image/")) {
+                contentType = "image";
+              }
+
+              const filename = pathModule.basename(resolvedPath);
+
+              try {
+                // Initialize upload to get presigned URL
+                const uploadInit = await client.mediaInitUpload({
+                  workspace_id: workspaceId,
+                  filename,
+                  size_bytes: fileStats.size,
+                  content_type: contentType,
+                  mime_type: mimeType,
+                  tags: input.tags,
+                });
+
+                // Read file and upload to presigned URL
+                const fileBuffer = await fs.readFile(resolvedPath);
+
+                // Upload to presigned URL - use only the headers from presigned response
+                // The presigned URL signature expects specific headers
+                const uploadResponse = await fetch(uploadInit.upload_url, {
+                  method: "PUT",
+                  headers: uploadInit.headers,
+                  body: fileBuffer,
+                });
+
+                if (!uploadResponse.ok) {
+                  return errorResult(
+                    `Failed to upload file: ${uploadResponse.status} ${uploadResponse.statusText}`
+                  );
+                }
+
+                // Complete the upload and trigger indexing
+                await client.mediaCompleteUpload({
+                  workspace_id: workspaceId,
+                  content_id: uploadInit.content_id,
+                });
+
+                const result = {
+                  status: "uploaded",
+                  message: "Media file uploaded successfully. Indexing has been triggered.",
+                  content_id: uploadInit.content_id,
+                  filename,
+                  content_type: contentType,
+                  size_bytes: fileStats.size,
+                  mime_type: mimeType,
+                  note: "Use media(action='status', content_id='...') to check indexing progress.",
+                };
+                return {
+                  content: [
+                    {
+                      type: "text" as const,
+                      text: `✅ Media uploaded successfully!\n\nContent ID: ${uploadInit.content_id}\nFilename: ${filename}\nType: ${contentType}\nSize: ${(fileStats.size / 1024 / 1024).toFixed(2)} MB\n\nIndexing has been triggered. Use media(action='status', content_id='${uploadInit.content_id}') to check progress.`,
+                    },
+                  ],
+                  structuredContent: toStructured(result),
+                };
+              } catch (err) {
+                const errMsg = err instanceof Error ? err.message : String(err);
+                return errorResult(`Failed to upload media: ${errMsg}`);
+              }
+            }
+
+            // Handle external URL (not yet implemented - requires backend support)
+            const result = {
+              status: "not_implemented",
+              message:
+                "External URL indexing is not yet implemented. Please use file_path for local files instead.",
+              action: "index",
+              external_url: input.external_url,
+              content_type: input.content_type,
+            };
+            return {
+              content: [{ type: "text" as const, text: formatContent(result) }],
+              structuredContent: toStructured(result),
+            };
+          }
+
+          case "status": {
+            if (!input.content_id) {
+              return errorResult("status requires: content_id");
+            }
+            if (!workspaceId) {
+              return errorResult(
+                "Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly."
+              );
+            }
+            try {
+              const content = await client.mediaGetContent({
+                workspace_id: workspaceId,
+                content_id: input.content_id,
+              });
+
+              // Format status message based on content status
+              let statusEmoji = "⏳";
+              let statusMessage = "Pending";
+              if (content.status === "indexed" || content.status === "ready") {
+                statusEmoji = "✅";
+                statusMessage = "Indexed and ready";
+              } else if (content.status === "processing" || content.status === "indexing") {
+                statusEmoji = "🔄";
+                statusMessage = `Processing${content.indexing_progress ? ` (${content.indexing_progress}%)` : ""}`;
+              } else if (content.status === "error" || content.status === "failed") {
+                statusEmoji = "❌";
+                statusMessage = content.indexing_error || "Indexing failed";
+              }
+
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: `${statusEmoji} ${content.filename}\n\nStatus: ${statusMessage}\nContent ID: ${content.id}\nType: ${content.content_type}\nSize: ${(content.size_bytes / 1024 / 1024).toFixed(2)} MB\nCreated: ${content.created_at}`,
+                  },
+                ],
+                structuredContent: toStructured(content),
+              };
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              return errorResult(`Failed to get content status: ${errMsg}`);
+            }
+          }
+
+          case "search": {
+            if (!input.query) {
+              return errorResult("search requires: query");
+            }
+            if (!workspaceId) {
+              return errorResult(
+                "Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly."
+              );
+            }
+            try {
+              const searchResult = await client.mediaSearchContent({
+                workspace_id: workspaceId,
+                query: input.query,
+                content_type: input.content_types?.[0], // API accepts single type for now
+                limit: input.limit,
+              });
+
+              if (searchResult.results.length === 0) {
+                return {
+                  content: [
+                    {
+                      type: "text" as const,
+                      text: `No results found for: "${input.query}"\n\nTry a different query or check that you have indexed media content.`,
+                    },
+                  ],
+                  structuredContent: toStructured(searchResult),
+                };
+              }
+
+              // Format search results
+              const resultsText = searchResult.results
+                .map((r, i) => {
+                  let timeInfo = "";
+                  if (r.timestamp_start !== undefined) {
+                    const startMin = Math.floor(r.timestamp_start / 60);
+                    const startSec = Math.floor(r.timestamp_start % 60);
+                    timeInfo = ` @ ${startMin}:${startSec.toString().padStart(2, "0")}`;
+                    if (r.timestamp_end !== undefined) {
+                      const endMin = Math.floor(r.timestamp_end / 60);
+                      const endSec = Math.floor(r.timestamp_end % 60);
+                      timeInfo += `-${endMin}:${endSec.toString().padStart(2, "0")}`;
+                    }
+                  }
+                  const matchText = r.match_text ? `\n   "${r.match_text}"` : "";
+                  return `${i + 1}. ${r.filename} (${r.content_type})${timeInfo}${matchText}`;
+                })
+                .join("\n\n");
+
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: `Found ${searchResult.total} result(s) for: "${input.query}"\n\n${resultsText}`,
+                  },
+                ],
+                structuredContent: toStructured(searchResult),
+              };
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              return errorResult(`Failed to search media: ${errMsg}`);
+            }
+          }
+
+          case "get_clip": {
+            if (!input.content_id) {
+              return errorResult("get_clip requires: content_id");
+            }
+            if (!workspaceId) {
+              return errorResult(
+                "Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly."
+              );
+            }
+
+            // Parse time strings (e.g., "1:34", "94s", "94") to seconds
+            const parseTime = (t: string | undefined): number | undefined => {
+              if (!t) return undefined;
+              // Handle "mm:ss" format
+              if (t.includes(":")) {
+                const parts = t.split(":").map(Number);
+                if (parts.length === 2) return parts[0] * 60 + parts[1];
+                if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+              }
+              // Handle "XXs" format
+              if (t.endsWith("s")) return parseFloat(t.slice(0, -1));
+              // Plain number
+              return parseFloat(t);
+            };
+
+            const startTime = parseTime(input.start);
+            const endTime = parseTime(input.end);
+
+            try {
+              const clipResult = await client.mediaGetClip({
+                workspace_id: workspaceId,
+                content_id: input.content_id,
+                start_time: startTime,
+                end_time: endTime,
+                format: input.output_format === "remotion" ? "remotion" : input.output_format === "ffmpeg" ? "ffmpeg" : "json",
+              });
+
+              // Format output based on requested format
+              let outputText = `📹 Clip from: ${clipResult.filename}\n\n`;
+              outputText += `Time range: ${clipResult.clip.start_time}s - ${clipResult.clip.end_time}s\n`;
+
+              if (clipResult.clip.transcript) {
+                outputText += `\nTranscript:\n"${clipResult.clip.transcript}"\n`;
+              }
+
+              if (clipResult.remotion_props && input.output_format === "remotion") {
+                outputText += `\n### Remotion Props:\n\`\`\`json\n${JSON.stringify(clipResult.remotion_props, null, 2)}\n\`\`\``;
+              }
+
+              if (clipResult.ffmpeg_command && input.output_format === "ffmpeg") {
+                outputText += `\n### FFmpeg Command:\n\`\`\`bash\n${clipResult.ffmpeg_command}\n\`\`\``;
+              }
+
+              return {
+                content: [{ type: "text" as const, text: outputText }],
+                structuredContent: toStructured(clipResult),
+              };
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              return errorResult(`Failed to get clip: ${errMsg}`);
+            }
+          }
+
+          case "list": {
+            if (!workspaceId) {
+              return errorResult(
+                "Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly."
+              );
+            }
+            try {
+              const listResult = await client.mediaListContent({
+                workspace_id: workspaceId,
+                content_type: input.content_types?.[0], // API accepts single type for now
+                limit: input.limit,
+              });
+
+              if (listResult.items.length === 0) {
+                return {
+                  content: [
+                    {
+                      type: "text" as const,
+                      text: "No media content found.\n\nUse media(action='index', file_path='...') to index media files.",
+                    },
+                  ],
+                  structuredContent: toStructured(listResult),
+                };
+              }
+
+              // Format list output
+              const itemsText = listResult.items
+                .map((item, i) => {
+                  const statusEmoji = item.status === "indexed" || item.status === "ready" ? "✅" : item.status === "processing" ? "🔄" : item.status === "error" ? "❌" : "⏳";
+                  const size = (item.size_bytes / 1024 / 1024).toFixed(2);
+                  return `${i + 1}. ${statusEmoji} ${item.filename}\n   Type: ${item.content_type} | Size: ${size} MB | Status: ${item.status}\n   ID: ${item.id}`;
+                })
+                .join("\n\n");
+
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: `📚 Media Library (${listResult.total} items)\n\n${itemsText}`,
+                  },
+                ],
+                structuredContent: toStructured(listResult),
+              };
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              return errorResult(`Failed to list media: ${errMsg}`);
+            }
+          }
+
+          case "delete": {
+            if (!input.content_id) {
+              return errorResult("delete requires: content_id");
+            }
+            if (!workspaceId) {
+              return errorResult(
+                "Error: workspace_id is required. Please call session_init first or provide workspace_id explicitly."
+              );
+            }
+            try {
+              const deleteResult = await client.mediaDeleteContent({
+                workspace_id: workspaceId,
+                content_id: input.content_id,
+              });
+
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: deleteResult.deleted
+                      ? `✅ Content deleted successfully.\n\nContent ID: ${input.content_id}`
+                      : `⚠️ Content may not have been deleted.\n\nContent ID: ${input.content_id}`,
+                  },
+                ],
+                structuredContent: toStructured(deleteResult),
+              };
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              return errorResult(`Failed to delete content: ${errMsg}`);
+            }
           }
 
           default:
