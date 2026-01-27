@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.44
+
+**Media tool for AI-powered video editing.**
+
+- **Media Tool** — Index, search, and retrieve clips from video/audio with semantic understanding. Actions: `index`, `status`, `search`, `get_clip`, `list`, `delete`. Designed for Remotion and FFmpeg workflows.
+
+- **Semantic Intent** — `context_smart` now returns intent classification for Pro+ users.
+
+```bash
+npm install -g @contextstream/mcp-server@latest
+```
+
+---
+
 ## 0.4.43
 
 **Enhanced Context warnings and Notion reliability improvements.**
