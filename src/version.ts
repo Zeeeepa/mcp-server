@@ -171,3 +171,71 @@ export async function getUpdateNotice(): Promise<VersionNotice | null> {
 
   return null;
 }
+
+/**
+ * Calculate how many minor versions behind the current version is.
+ * Returns 0 if current >= latest or if versions can't be parsed.
+ */
+export function getVersionsBehind(current: string, latest: string): number {
+  try {
+    const currentParts = current.split(".").map(Number);
+    const latestParts = latest.split(".").map(Number);
+
+    // If major version differs, treat as very behind (10+)
+    if ((latestParts[0] ?? 0) > (currentParts[0] ?? 0)) {
+      return 10 + ((latestParts[1] ?? 0) - (currentParts[1] ?? 0));
+    }
+
+    // If same major, calculate minor + patch delta
+    const minorDiff = (latestParts[1] ?? 0) - (currentParts[1] ?? 0);
+    const patchDiff = (latestParts[2] ?? 0) - (currentParts[2] ?? 0);
+
+    if (minorDiff > 0) {
+      return minorDiff;
+    } else if (minorDiff === 0 && patchDiff > 0) {
+      return 1; // At least 1 patch behind
+    }
+
+    return 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Generate a version warning message for the warnings array.
+ * Returns null if not behind.
+ */
+export function getVersionWarning(notice: VersionNotice | null): string | null {
+  if (!notice?.behind) return null;
+
+  const versionsBehind = getVersionsBehind(notice.current, notice.latest);
+
+  if (versionsBehind >= 3) {
+    return `[VERSION_CRITICAL] MCP server is ${versionsBehind} versions behind (${notice.current} → ${notice.latest}). Update immediately: ${notice.upgrade_command}`;
+  } else if (versionsBehind >= 1) {
+    return `[VERSION_NOTICE] MCP server update available (${notice.current} → ${notice.latest}). Run: ${notice.upgrade_command}`;
+  }
+
+  return null;
+}
+
+/**
+ * Get instructions for how often to mention version updates based on how far behind.
+ * This gets prepended to context for the AI to follow.
+ */
+export function getVersionInstructions(notice: VersionNotice | null): string | null {
+  if (!notice?.behind) return null;
+
+  const versionsBehind = getVersionsBehind(notice.current, notice.latest);
+
+  if (versionsBehind >= 5) {
+    return `⚠️ CRITICAL: User's MCP is ${versionsBehind} versions behind. Mention update in EVERY response until updated.`;
+  } else if (versionsBehind >= 3) {
+    return `⚠️ User's MCP is ${versionsBehind} versions behind. Remind about update every 2-3 messages.`;
+  } else if (versionsBehind >= 1) {
+    return `Note: MCP update available (${notice.current}→${notice.latest}). Mention once at session start.`;
+  }
+
+  return null;
+}

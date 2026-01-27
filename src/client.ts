@@ -11,7 +11,7 @@ import {
   addGlobalMapping,
 } from "./workspace-config.js";
 import { globalCache, CacheKeys, CacheTTL } from "./cache.js";
-import { VERSION, getUpdateNotice, type VersionNotice } from "./version.js";
+import { VERSION, getUpdateNotice, getVersionWarning, getVersionInstructions, type VersionNotice } from "./version.js";
 
 const uuidSchema = z.string().uuid();
 
@@ -3224,10 +3224,27 @@ export class ContextStreamClient {
         // ignore version check failures
       }
 
+      // Build warnings array, including version warning if behind
+      const warnings: string[] = [];
+      if (Array.isArray(data?.warnings)) {
+        warnings.push(...data.warnings);
+      }
+      const versionWarning = getVersionWarning(versionNotice);
+      if (versionWarning) {
+        warnings.push(versionWarning);
+      }
+
+      // Prepend version instructions to context if significantly behind
+      let context = String(data?.context ?? "");
+      const versionInstructions = getVersionInstructions(versionNotice);
+      if (versionInstructions) {
+        context = `${versionInstructions}\n\n${context}`;
+      }
+
       return {
-        context: String(data?.context ?? ""),
+        context,
         token_estimate: Number(
-          data?.token_estimate ?? Math.ceil(String(data?.context ?? "").length / 4)
+          data?.token_estimate ?? Math.ceil(context.length / 4)
         ),
         format: String(data?.format ?? format),
         sources_used: Number(data?.sources_used ?? 0),
@@ -3235,7 +3252,7 @@ export class ContextStreamClient {
         project_id: withDefaults.project_id,
         ...(versionNotice ? { version_notice: versionNotice } : {}),
         ...(Array.isArray(data?.errors) ? { errors: data.errors } : {}),
-        ...(Array.isArray(data?.warnings) && data.warnings.length > 0 ? { warnings: data.warnings } : {}),
+        ...(warnings.length > 0 ? { warnings } : {}),
         ...(this.indexRefreshInProgress ? { index_status: "refreshing" as const } : {}),
         ...(data?.context_pressure ? { context_pressure: data.context_pressure } : {}),
         ...(data?.semantic_intent ? { semantic_intent: data.semantic_intent } : {}),
@@ -3459,15 +3476,32 @@ export class ContextStreamClient {
       // ignore version check failures
     }
 
+    // Build warnings array - always include version warning at session_init if behind
+    const warnings: string[] = [];
+    const versionWarning = getVersionWarning(versionNotice);
+    if (versionWarning) {
+      warnings.push(versionWarning);
+    }
+
+    // Always prepend version instructions at session_init if behind
+    let finalContext = context;
+    if (versionNotice?.behind) {
+      const versionInstructions = getVersionInstructions(versionNotice);
+      if (versionInstructions) {
+        finalContext = `${versionInstructions}\n\n${context}`;
+      }
+    }
+
     return {
-      context,
-      token_estimate: Math.ceil(context.length / 4),
+      context: finalContext,
+      token_estimate: Math.ceil(finalContext.length / 4),
       format,
       sources_used: items.filter((i) => context.includes(i.value.slice(0, 20))).length,
       workspace_id: withDefaults.workspace_id,
       project_id: withDefaults.project_id,
       ...(versionNotice ? { version_notice: versionNotice } : {}),
       ...(errors.length > 0 && { errors }), // Include errors for debugging
+      ...(warnings.length > 0 && { warnings }), // Include version warnings
       ...(this.indexRefreshInProgress ? { index_status: "refreshing" as const } : {}),
     };
   }
